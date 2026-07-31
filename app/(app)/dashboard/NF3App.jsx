@@ -472,6 +472,8 @@ function patchPurchasingWallet(w) {
 const checkFloor = (walletId, amount, wallets, transactions, user) => {
   const w = wallets.find(x => x.id === walletId);
   if (!w || walletAllowNegative(w)) return null;
+  // Shared bank: saldo di FNB; purchasing dapat mirror balance=null → jangan anggap 0 di klien.
+  if (isSharedWallet(w)) return null;
   const bal = walletBalance(walletId, wallets, transactions);
   const hidden = shouldHideWalletBalance(w, user);
   if (!w.floor && bal - amount < 0) {

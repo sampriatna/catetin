@@ -11,6 +11,7 @@ import {
   resolveSharedLinkFromWalletId,
   buildSourceTransaction,
   appendTransactionToDoc,
+  sharedBankFloorError,
 } from "../../../lib/sharedBankWrite.js";
 import {
   computeWalletBalanceFromDoc,
@@ -150,7 +151,9 @@ export async function GET(req) {
     }
 
     if (auth.user.role === "purchasing") {
-      // Purchasing: bank Sam saldo disembunyikan; Uang NF / PayLater (ops_share) boleh lihat.
+      // Purchasing: bank Sam — angka saldo disembunyikan di UI/API (balance=null).
+      // Validasi kecukupan saldo dilakukan di POST (sumber FNB), bukan di klien.
+      // Uang NF / PayLater (ops_share) boleh lihat saldo.
       const full = mirrorBalancesForLinks(links, docs);
       const out = {};
       for (const link of links) {
@@ -253,8 +256,34 @@ export async function POST(req) {
     }
 
     const srcWallets = srcRow.data.wallets || [];
-    if (!srcWallets.some((w) => w.id === link.sourceWalletId && w.active !== false)) {
+    const srcWallet = srcWallets.find((w) => w.id === link.sourceWalletId && w.active !== false);
+    if (!srcWallet) {
       return Response.json({ error: "Rekening sumber tidak aktif di FNB." }, { status: 400 });
+    }
+
+    const currentBal = computeWalletBalanceFromDoc(srcRow.data, link.sourceWalletId);
+    const allowNegative =
+      srcWallet.type === "paylater" ||
+      srcWallet.liability === true ||
+      srcWallet.allowNegative === true ||
+      (link.linkKind === "ops_share" && /paylater/i.test(`${link.label || ""} ${link.sourceWalletName || ""}`));
+    const displayName = link.label || link.sourceWalletName || "dompet bersama";
+    const floorErr = sharedBankFloorError({
+      type,
+      amount,
+      balance: currentBal,
+      walletName: displayName,
+      hideAmount: auth.user.role === "purchasing" && link.linkKind !== "ops_share",
+      allowNegative,
+    });
+    if (floorErr) {
+      return Response.json(
+        {
+          error: floorErr,
+          balance: auth.user.role === "purchasing" && link.linkKind !== "ops_share" ? null : currentBal,
+        },
+        { status: 400 }
+      );
     }
 
     const { doc: nextDoc, appended } = appendTransactionToDoc(srcRow.data, sourceTx);
