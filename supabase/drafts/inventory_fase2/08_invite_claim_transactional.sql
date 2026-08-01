@@ -1,53 +1,42 @@
 -- ============================================================================
--- DRAFT 08 — Invite / claim transactional (members + assignments)
--- STATUS: JANGAN DIJALANKAN sampai Owner approve + app siap
--- Prerequisite: 01–02
--- Tidak mengganti accept_invite / claim_pending_invites lama sampai cutover.
+-- DRAFT 08 — Invite / claim (revisi putaran 3 — keamanan email)
+-- STATUS: JANGAN DIJALANKAN sampai Owner approve
 -- ============================================================================
 
 BEGIN;
 
 create or replace function public._invite_legacy_member_role(p_invite_role text)
-returns text
-language sql immutable as $$
+returns text language sql immutable as $$
   select case
-    when p_invite_role in ('admin', 'kasir', 'purchasing') then p_invite_role
+    when p_invite_role in ('admin','kasir','purchasing') then p_invite_role
     else 'member'
   end;
 $$;
-
 revoke all on function public._invite_legacy_member_role(text) from public, anon, authenticated;
 
 create or replace function public._invite_default_permissions(p_assignment_role text)
-returns text[]
-language sql immutable as $$
+returns text[] language sql immutable as $$
   select case p_assignment_role
-    when 'dapur' then array['opname_stock', 'request_stock', 'view_inventory']::text[]
-    when 'bar' then array['opname_stock', 'request_stock', 'view_inventory']::text[]
+    when 'dapur' then array['opname_stock','request_stock','view_inventory']::text[]
+    when 'bar' then array['opname_stock','request_stock','view_inventory']::text[]
     when 'operasional_samtaro' then array[
-      'opname_stock', 'request_stock', 'view_inventory', 'receive_stock'
+      'opname_stock','request_stock','view_inventory','receive_stock'
     ]::text[]
     when 'forecasting_inventory' then array[
-      'view_inventory', 'view_stock_value', 'create_transfer',
-      'receive_to_warehouse', 'manage_items', 'approve_opname_variance',
-      'opname_stock', 'request_stock'
+      'view_inventory','view_stock_value','create_transfer',
+      'receive_to_warehouse','manage_items','approve_opname_variance',
+      'opname_stock','request_stock'
     ]::text[]
-    when 'kasir' then array['view_inventory']::text[]  -- TANPA receive_stock otomatis
-    when 'admin' then array[
-      'view_inventory', 'view_stock_value', 'review_purchasing_link'
-    ]::text[]
+    when 'kasir' then array['view_inventory']::text[]
+    when 'admin' then array['view_inventory','view_stock_value','review_purchasing_link']::text[]
     else array[]::text[]
   end;
 $$;
-
 revoke all on function public._invite_default_permissions(text) from public, anon, authenticated;
 
 create or replace function public.accept_invite_v2(p_token text)
 returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
+language plpgsql security definer set search_path = public as $$
 declare
   v_uid uuid := auth.uid();
   v_inv public.invites;
@@ -59,24 +48,27 @@ declare
   v_needs_location boolean;
   v_assignment public.member_assignments;
   v_new_legacy text;
+  v_email text;
 begin
-  if v_uid is null then
-    raise exception 'Harus login dulu';
-  end if;
+  if v_uid is null then raise exception 'Harus login dulu'; end if;
 
-  select * into v_inv
-  from public.invites
+  select * into v_inv from public.invites
   where token = p_token and not accepted and expires_at > now()
-  limit 1
-  for update;
+  limit 1 for update;
+  if v_inv.id is null then raise exception 'Undangan tidak valid atau sudah kadaluarsa'; end if;
 
-  if v_inv.id is null then
-    raise exception 'Undangan tidak valid atau sudah kadaluarsa';
+  -- Email invite wajib cocok jika terisi
+  if v_inv.email is not null and length(trim(v_inv.email)) > 0 then
+    select email into v_email from public.profiles where id = v_uid;
+    if v_email is null or lower(trim(v_email)) <> lower(trim(v_inv.email)) then
+      raise exception 'Email akun login (%) tidak cocok dengan undangan (%)',
+        coalesce(v_email,'(kosong)'), v_inv.email;
+    end if;
   end if;
 
   v_assign_role := v_inv.role;
   v_legacy_role := public._invite_legacy_member_role(v_inv.role);
-  v_needs_location := v_assign_role in ('dapur', 'bar', 'operasional_samtaro', 'kasir');
+  v_needs_location := v_assign_role in ('dapur','bar','operasional_samtaro','kasir');
 
   v_location_id := null;
   if v_needs_location then
@@ -85,40 +77,27 @@ begin
     end if;
     v_location_id := public._location_id_for_outlet(v_inv.business_id, v_inv.outlet);
     if v_location_id is null then
-      raise exception 'Location untuk outlet % tidak ditemukan — invite gagal (tidak dijadikan business-wide)', v_inv.outlet;
+      raise exception 'Location untuk outlet % tidak ditemukan — invite gagal', v_inv.outlet;
     end if;
   end if;
+  if v_assign_role = 'forecasting_inventory' then v_location_id := null; end if;
 
-  -- forecasting: business-wide (location null) — eksplisit
-  if v_assign_role = 'forecasting_inventory' then
-    v_location_id := null;
-  end if;
-
-  select * into v_existing
-  from public.business_members
-  where business_id = v_inv.business_id and user_id = v_uid
-  for update;
+  select * into v_existing from public.business_members
+  where business_id = v_inv.business_id and user_id = v_uid for update;
 
   if found then
-    -- Jangan turunkan owner/admin/kasir/purchasing menjadi member
     v_new_legacy := v_existing.role;
-    if v_existing.role = 'member' and v_legacy_role in ('admin', 'kasir', 'purchasing') then
+    if v_existing.role = 'member' and v_legacy_role in ('admin','kasir','purchasing') then
       v_new_legacy := v_legacy_role;
-    elsif v_existing.role in ('kasir', 'purchasing')
-          and v_legacy_role = 'admin' then
-      v_new_legacy := 'admin'; -- upgrade
-    elsif v_existing.role = 'member' and v_legacy_role = 'member' then
-      v_new_legacy := 'member';
+    elsif v_existing.role in ('kasir','purchasing') and v_legacy_role = 'admin' then
+      v_new_legacy := 'admin';
     end if;
-    -- selain itu pertahankan role existing
 
     update public.business_members
     set active = true,
         role = v_new_legacy,
-        -- Jangan timpa outlet legacy untuk assignment tambahan outlet lain
         outlet = case
-          when v_assign_role = 'kasir' and v_inv.outlet is not null
-            then v_inv.outlet
+          when v_assign_role = 'kasir' and v_inv.outlet is not null then v_inv.outlet
           else public.business_members.outlet
         end
     where id = v_existing.id
@@ -126,51 +105,34 @@ begin
   else
     insert into public.business_members (business_id, user_id, role, outlet, active)
     values (
-      v_inv.business_id,
-      v_uid,
-      v_legacy_role,
+      v_inv.business_id, v_uid, v_legacy_role,
       case when v_assign_role = 'kasir' then v_inv.outlet else null end,
       true
-    )
-    returning * into v_member;
+    ) returning * into v_member;
   end if;
 
-  -- upsert assignment INTERNAL
   v_assignment := public.upsert_member_assignment(
-    v_member.id,
-    v_assign_role,
-    v_location_id,
-    public._invite_default_permissions(v_assign_role),
-    true
+    v_member.id, v_assign_role, v_location_id,
+    public._invite_default_permissions(v_assign_role), true
   );
 
   update public.invites set accepted = true where id = v_inv.id;
 
-  return jsonb_build_object(
-    'member', to_jsonb(v_member),
-    'assignment', to_jsonb(v_assignment)
-  );
+  return jsonb_build_object('member', to_jsonb(v_member), 'assignment', to_jsonb(v_assignment));
 end;
 $$;
-
 revoke all on function public.accept_invite_v2(text) from public, anon;
 grant execute on function public.accept_invite_v2(text) to authenticated;
 
 create or replace function public.claim_pending_invites_v2()
 returns setof jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
+language plpgsql security definer set search_path = public as $$
 declare
-  v_uid uuid := auth.uid();
-  v_email text;
-  v_inv public.invites;
+  v_uid uuid := auth.uid(); v_email text; v_inv public.invites;
 begin
   if v_uid is null then raise exception 'Harus login dulu'; end if;
   select email into v_email from public.profiles where id = v_uid;
   if v_email is null or trim(v_email) = '' then return; end if;
-
   for v_inv in
     select * from public.invites
     where lower(trim(email)) = lower(trim(v_email))
@@ -181,7 +143,6 @@ begin
   end loop;
 end;
 $$;
-
 revoke all on function public.claim_pending_invites_v2() from public, anon;
 grant execute on function public.claim_pending_invites_v2() to authenticated;
 
