@@ -50,7 +50,9 @@
 - Approved/locked membekukan seluruh field penting  
 
 ### E) Stale opname
-- Submit → buat receive/transfer di lokasi yang sama → approve → `recount_required`  
+- Submit → buat receive/transfer di lokasi yang sama → `approve_stock_opname` /
+  `post_stock_opname_if_no_approval` → **return row** dengan `status = recount_required`
+  (bukan exception; status harus committed/terlihat setelah RPC sukses)  
 - Positive adj tanpa avg cost tanpa `unit_cost_override` → gagal  
 - Positive adj dengan override → wajib Owner approval  
 - `physical_qty < 0` → gagal  
@@ -67,8 +69,12 @@
 
 ### G) Transfer variance
 - Payload kosong / `received_qty=0` / duplicate line → reject  
-- `resolve_transfer_variance` membuat movement nyata untuk return/damaged/shrinkage/received_later/adjustment_approved  
-- Sisa IN_TRANSIT berkurang sesuai resolusi  
+- `resolve_transfer_variance` membuat movement nyata untuk
+  `returned_to_source` / `damaged` / `shrinkage` / `adjustment_approved`  
+- `resolution = received_later` → **reject** (penerimaan lanjutan hanya
+  `receive_stock_transfer` + assignment `receive_stock` di outlet)  
+- Forecasting/owner **tidak** bisa transfer_in ke outlet lewat variance  
+- Sisa IN_TRANSIT berkurang sesuai resolusi (bukan lewat received_later)  
 
 ### H) Assignment audit
 - Owner kirim `assignment_id` milik user lain → exception  
@@ -88,9 +94,14 @@
 - Line transfer/receipt/opname/production dengan lot beda item → gagal di trigger  
 - Item `expiry_mode=required` tanpa expiry pada receipt/opening/production output → gagal  
 
-### L) Invite email
-- Token invite email A dipakai akun email B → gagal  
-- Invite tanpa email (token-based) tetap bisa  
+### L) Invite email + cutover gate
+- Token invite email A dipakai akun email B → gagal (v2)  
+- Invite tanpa email (token-based) tetap bisa (v2)  
+- **Gate:** `01`/`08` belum boleh apply sampai app memanggil v2 dan smoke
+  invite legacy (`accept_invite` / `claim_pending_invites` untuk
+  admin/kasir/purchasing) lulus — lihat `INVITE_CUTOVER.md`  
+- Draft `08` **tidak** replace RPC legacy; keduanya harus tetap ada berdampingan
+  sampai Owner deprecate terpisah  
 
 ### M) Rollback ketat
 - Ada 1 row di `suppliers` / draft transfer / draft movement → rollback berhenti sebelum DROP  

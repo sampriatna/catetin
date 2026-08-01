@@ -1,23 +1,26 @@
-# Perubahan putaran 3 (setelah PR #3 merged)
+# Perubahan putaran 3 → putaran 4 (blocker review)
 
-Branch/PR **baru** — bukan update PR #3.
+Branch/PR yang sama (#4) — revisi blocker; **bukan** migration timestamp; **tidak** dieksekusi.
 
 | File | Perubahan utama |
 |---|---|
-| `00_README_REVIEW.md` | Catatan PR #3 sudah merge; larangan eksekusi; arsitektur RPC-only |
-| `01_…assignments.sql` | CHECK role↔location (dapur/bar/kasir/ops wajib lokasi; forecasting null) |
-| `02_…master.sql` | CHECK settings; `stock_unit_id` canonical + sync; opening sessions; FK RESTRICT; lot validator reusable |
-| `03_…ledger.sql` | Tabel `stock_movement_compensations`; tidak update posted; `from<>to`; kompensasi selalu via row baru |
-| `04_…waste.sql` | Opname snapshot/recount; `physical_qty>=0`; transfer receipts `qty>0` + unique line; variance resolutions table |
-| `05_…links.sql` | Freeze penuh approved/locked/received; from_po wajib PR sama; `received` flag |
-| `06_…rpcs.sql` | Hapus write policy purchasing links; state/settings write hanya lewat RPC |
-| `07_domain_rpcs.sql` | `_require_assignment` ketat; create/review link; receive gates; cost_pending terpisah; stale opname; opening session+go-live; resolve variance; draft RPCs |
-| `08_…invite.sql` | Email invite wajib cocok dengan profile login |
-| `99_ROLLBACK_ALL.sql` | Preflight: **setiap** tabel baru bila ada row → stop sebelum DROP |
-| `SECURITY_TEST_PLAN.md` | + kasus A–N putaran 3 |
+| `00_README_REVIEW.md` | Gate cutover invite `01`/`08`; larangan ganti RPC legacy / ubah app lama |
+| `INVITE_CUTOVER.md` | **Baru** — rencana cutover kompatibel `accept_invite` / `claim_pending_invites` |
+| `01_…assignments.sql` | Header GATE: jangan apply sebelum app v2 + smoke legacy lulus |
+| `02_…master.sql` | (tidak diubah di putaran 4) |
+| `03_…ledger.sql` | (tidak diubah di putaran 4) |
+| `04_…waste.sql` | Hapus `received_later` dari CHECK variance resolutions |
+| `05_…links.sql` | (tidak diubah di putaran 4) |
+| `06_…rpcs.sql` | (tidak diubah di putaran 4) |
+| `07_domain_rpcs.sql` | Stale opname: UPDATE `recount_required` lalu **return** (tanpa RAISE); hapus path `received_later` di `resolve_transfer_variance` |
+| `08_…invite.sql` | Header GATE; tetap **additive** v2 saja — tidak replace RPC legacy |
+| `99_ROLLBACK_ALL.sql` | (tidak diubah di putaran 4) |
+| `SECURITY_TEST_PLAN.md` | Stale opname return; variance tanpa received_later; gate invite |
+| `SCHEMA_SUMMARY.md` | Transfer receive vs variance diperjelas |
 
-## Belum ada
+## Belum ada / tidak dilakukan di revisi ini
 
 - Migration timestamp di `supabase/migrations/`
-- Approval / eksekusi SQL
-- Opening go-live produksi
+- Eksekusi SQL / seed / deploy
+- Perubahan file aplikasi lama, `app_state`, wallets, transactions, RPC login lama, policy legacy
+- Replace / drop `accept_invite` / `claim_pending_invites`

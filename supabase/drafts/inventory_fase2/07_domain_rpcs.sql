@@ -392,8 +392,10 @@ begin
   for elem in select * from jsonb_array_elements(p_lines)
   loop
     v_res := elem->>'resolution';
-    if v_res not in ('received_later','returned_to_source','damaged','shrinkage','adjustment_approved') then
-      raise exception 'resolution tidak valid';
+    -- received_later dilarang: penerimaan lanjutan hanya outlet via
+    -- receive_stock_transfer + permission receive_stock.
+    if v_res not in ('returned_to_source','damaged','shrinkage','adjustment_approved') then
+      raise exception 'resolution tidak valid (penerimaan lanjutan lewat receive_stock_transfer)';
     end if;
     v_qty := (elem->>'quantity')::numeric;
     if v_qty is null or v_qty <= 0 then raise exception 'quantity resolusi harus > 0'; end if;
@@ -413,24 +415,7 @@ begin
       elem->>'reason', v_group, auth.uid(), p_assignment_id
     );
 
-    if v_res = 'received_later' then
-      -- sama seperti receive ke outlet
-      insert into public.stock_movements (
-        business_id, movement_group_id, movement_type, item_id, lot_id,
-        from_location_id, to_location_id, quantity, unit_cost,
-        reference_type, reference_id, status,
-        created_by, assignment_id, acting_role, acting_location_id
-      ) values (
-        v_t.business_id, v_group, 'transfer_in', v_line.item_id, v_line.lot_id,
-        v_transit, v_t.to_location_id, v_qty, v_line.unit_cost,
-        'stock_transfer_variance', v_t.id, 'draft',
-        auth.uid(), p_assignment_id, coalesce(v_a.role,'owner'), v_t.to_location_id
-      ) returning id into v_mid;
-      perform public._post_stock_movement_internal(v_mid);
-      update public.stock_transfer_lines
-      set received_qty_total = received_qty_total + v_qty where id = v_line.id;
-
-    elsif v_res = 'returned_to_source' then
+    if v_res = 'returned_to_source' then
       insert into public.stock_movements (
         business_id, movement_group_id, movement_type, item_id, lot_id,
         from_location_id, to_location_id, quantity, unit_cost,
@@ -765,33 +750,26 @@ begin
   if not found then raise exception 'opname tidak ditemukan'; end if;
   if v_o.status <> 'submitted' then raise exception 'opname belum submitted'; end if;
 
-  -- Stale snapshot check
+  -- Stale snapshot: persist recount_required lalu RETURN (jangan RAISE —
+  -- exception membatalkan UPDATE dalam transaksi RPC yang sama).
   select max(posted_at) into v_latest from public.stock_movements
   where business_id = v_o.business_id and status = 'posted'
     and (from_location_id = v_o.location_id or to_location_id = v_o.location_id);
-  if v_latest is not null and v_o.snapshot_last_movement_at is not null
-     and v_latest > v_o.snapshot_last_movement_at then
+  if (v_latest is not null and v_o.snapshot_last_movement_at is not null
+      and v_latest > v_o.snapshot_last_movement_at)
+     or (v_latest is not null and v_o.snapshot_last_movement_at is null)
+     or (
+       v_o.snapshot_at is not null and exists (
+         select 1 from public.stock_movements m
+         where m.business_id = v_o.business_id and m.status = 'posted'
+           and m.posted_at > v_o.snapshot_at
+           and (m.from_location_id = v_o.location_id or m.to_location_id = v_o.location_id)
+       )
+     ) then
     perform set_config('inventory.opname_rpc', '1', true);
     update public.stock_opnames set status = 'recount_required' where id = v_o.id returning * into v_o;
     perform set_config('inventory.opname_rpc', '', true);
-    raise exception 'stok berubah setelah snapshot — status recount_required, hitung ulang';
-  end if;
-  if v_latest is not null and v_o.snapshot_last_movement_at is null then
-    perform set_config('inventory.opname_rpc', '1', true);
-    update public.stock_opnames set status = 'recount_required' where id = v_o.id returning * into v_o;
-    perform set_config('inventory.opname_rpc', '', true);
-    raise exception 'ada movement baru setelah snapshot kosong — recount_required';
-  end if;
-  if v_o.snapshot_at is not null and exists (
-    select 1 from public.stock_movements m
-    where m.business_id = v_o.business_id and m.status = 'posted'
-      and m.posted_at > v_o.snapshot_at
-      and (m.from_location_id = v_o.location_id or m.to_location_id = v_o.location_id)
-  ) then
-    perform set_config('inventory.opname_rpc', '1', true);
-    update public.stock_opnames set status = 'recount_required' where id = v_o.id returning * into v_o;
-    perform set_config('inventory.opname_rpc', '', true);
-    raise exception 'movement setelah snapshot_at — recount_required';
+    return v_o;
   end if;
 
   select * into v_loc from public.inventory_locations where id = v_o.location_id;
@@ -864,6 +842,7 @@ begin
     raise exception 'opname membutuhkan approval';
   end if;
 
+  -- Stale snapshot: persist recount_required lalu RETURN (jangan RAISE).
   select max(posted_at) into v_latest from public.stock_movements
   where business_id = v_o.business_id and status = 'posted'
     and (from_location_id = v_o.location_id or to_location_id = v_o.location_id);
@@ -872,9 +851,10 @@ begin
         or (v_o.snapshot_at is not null and v_latest > v_o.snapshot_at)
       )) then
     perform set_config('inventory.opname_rpc', '1', true);
-    update public.stock_opnames set status = 'recount_required' where id = v_o.id;
+    update public.stock_opnames set status = 'recount_required'
+    where id = v_o.id returning * into v_o;
     perform set_config('inventory.opname_rpc', '', true);
-    raise exception 'stok berubah setelah snapshot — recount_required';
+    return v_o;
   end if;
 
   v_a := public._require_assignment(v_o.business_id, p_assignment_id, 'opname_stock', v_o.location_id);

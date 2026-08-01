@@ -236,8 +236,10 @@ create table if not exists public.stock_transfer_variance_resolutions (
   business_id uuid not null references public.businesses(id) on delete cascade,
   transfer_id uuid not null,
   transfer_line_id uuid not null,
+  -- received_later TIDAK diizinkan: penerimaan lanjutan hanya lewat
+  -- receive_stock_transfer + assignment receive_stock di outlet.
   resolution text not null check (resolution in (
-    'received_later','returned_to_source','damaged','shrinkage','adjustment_approved'
+    'returned_to_source','damaged','shrinkage','adjustment_approved'
   )),
   quantity numeric(18,6) not null check (quantity > 0),
   reason text null,

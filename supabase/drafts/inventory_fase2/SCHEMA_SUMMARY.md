@@ -21,9 +21,17 @@ Lokasi: `supabase/drafts/inventory_fase2/` (bukan `migrations/`).
 
 ```
 Sent:    from → IN_TRANSIT   transfer_out   (1 movement/item)
-Receive: IN_TRANSIT → outlet transfer_in    (via stock_transfer_receipts)
-Residual IN_TRANSIT → resolve_transfer_variance (movement nyata)
+Receive: IN_TRANSIT → outlet transfer_in    (receive_stock_transfer + receive_stock)
+Residual IN_TRANSIT → resolve_transfer_variance
+         (returned_to_source / damaged / shrinkage / adjustment_approved)
+         — BUKAN received_later; penerimaan lanjutan tetap lewat receive outlet
 ```
+
+## Invite
+
+- Legacy: `accept_invite` / `claim_pending_invites` — **tetap** (tidak diganti di draft)
+- Baru: `accept_invite_v2` / `claim_pending_invites_v2` — additive
+- Gate apply `01`/`08`: lihat `INVITE_CUTOVER.md`
 
 ## Compensation
 

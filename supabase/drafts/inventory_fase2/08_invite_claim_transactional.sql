@@ -1,6 +1,13 @@
 -- ============================================================================
--- DRAFT 08 — Invite / claim (revisi putaran 3 — keamanan email)
+-- DRAFT 08 — Invite / claim v2 (revisi putaran 3 — keamanan email)
 -- STATUS: JANGAN DIJALANKAN sampai Owner approve
+--
+-- GATE CUTOVER INVITE (WAJIB):
+--   Additive saja: membuat accept_invite_v2 / claim_pending_invites_v2.
+--   JANGAN CREATE OR REPLACE / DROP public.accept_invite atau
+--   public.claim_pending_invites — RPC legacy wajib tetap ada.
+--   Jangan terapkan file ini sebelum aplikasi memanggil RPC v2 dan
+--   smoke test invite legacy lulus. Lihat: INVITE_CUTOVER.md
 -- ============================================================================
 
 BEGIN;

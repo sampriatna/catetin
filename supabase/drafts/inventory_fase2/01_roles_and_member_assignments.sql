@@ -1,6 +1,14 @@
 -- ============================================================================
 -- DRAFT 01 — Roles + member_assignments (revisi putaran 3)
 -- STATUS: JANGAN DIJALANKAN sampai Owner approve file ini
+--
+-- GATE CUTOVER INVITE (WAJIB):
+--   File ini MEMPERLUAS invites.role / business_members.role CHECK.
+--   JANGAN terapkan sebelum:
+--     1) aplikasi memanggil accept_invite_v2 / claim_pending_invites_v2, DAN
+--     2) smoke test invite legacy (accept_invite / claim_pending_invites) lulus.
+--   Draft ini TIDAK mengganti RPC invite lama.
+--   Lihat: INVITE_CUTOVER.md
 -- ============================================================================
 
 BEGIN;
