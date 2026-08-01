@@ -19,7 +19,7 @@ Migration timestamp resmi di `supabase/migrations/` **belum** dibuat.
 | # | File | Status review |
 |---|---|---|
 | 01 | `01_roles_and_member_assignments.sql` | **GATE cutover invite** — lihat `INVITE_CUTOVER.md` |
-| 02 | `02_inventory_master.sql` | revisi |
+| 02 | `02_inventory_master.sql` | dependensi cutover invite (`01→02→08`) |
 | 03 | `03_stock_ledger.sql` | revisi blocker |
 | 04 | `04_opname_transfers_waste.sql` | revisi |
 | 05 | `05_requests_purchasing_links.sql` | revisi blocker |
@@ -30,12 +30,12 @@ Migration timestamp resmi di `supabase/migrations/` **belum** dibuat.
 
 ## Gate cutover invite (blocker)
 
-`01` dan `08` **tidak boleh diterapkan** sebelum:
+Urutan benar (ringkas): role inventory belum di UI legacy → staging
+`01 → 02 → 08` (RPC legacy tetap utuh) → smoke legacy → baru deploy app v2
+(feature flag) → smoke v2 → enable role inventory → production controlled cutover.
 
-1. Aplikasi memanggil `accept_invite_v2` / `claim_pending_invites_v2`, dan
-2. Smoke test invite **legacy** (`accept_invite` / `claim_pending_invites`) lulus.
-
-RPC legacy **tidak diganti** di draft ini. Rencana lengkap: [`INVITE_CUTOVER.md`](./INVITE_CUTOVER.md).
+RPC legacy **tidak diganti** di draft ini. Rencana lengkap + rollback/stop:
+[`INVITE_CUTOVER.md`](./INVITE_CUTOVER.md).
 
 ## Keputusan bisnis terkunci (ringkas)
 
@@ -60,7 +60,8 @@ Bukan client write bebas, bukan service-role tanpa cek user.
 ## Larangan
 
 - Jangan jalankan SQL folder ini sebelum approve per file.
-- Jangan terapkan `01` / `08` sebelum gate cutover invite lulus.
+- Jangan deploy app yang memanggil v2 sebelum `01 → 02 → 08` ada di target.
+- Ikuti `INVITE_CUTOVER.md`; STOP + rollback jika smoke legacy gagal setelah apply SQL.
 - Jangan `CREATE OR REPLACE` / drop `accept_invite` / `claim_pending_invites` lama.
 - Jangan buat migration timestamp sebelum approve.
 - Jangan ubah `.env` / hapus data legacy.

@@ -1,52 +1,80 @@
 # Rencana cutover invite — kompatibel legacy
 
-**STATUS: WAJIB DIBACA SEBELUM MENERAPKAN `01` / `08`**
+**STATUS: WAJIB DIBACA SEBELUM CUTOVER STAGING / PRODUCTION**
 
 Draft ini **tidak** mengganti `public.accept_invite(text)` maupun
-`public.claim_pending_invites()`. Aplikasi Catatin lama (`lib/repo.js`,
-login, API invite) tetap memanggil RPC legacy sampai cutover aplikasi selesai.
+`public.claim_pending_invites()`. Aplikasi Catatin lama tetap memanggil RPC
+legacy sampai app PR terpisah (dengan feature flag) di-deploy setelah SQL v2 ada.
 
-## Mengapa `01` + `08` diblok sebelum cutover app
+Revisi PR draft ini **tidak** mengubah aplikasi lama, RPC legacy, `app_state`,
+wallets, transactions, atau database produksi. **Jangan merge sebagai migration
+dan jangan eksekusi SQL** dari PR review ini.
 
-| Perubahan | Risiko jika app masih pakai RPC lama |
+## Dependensi file
+
+| File | Peran untuk invite v2 |
 |---|---|
-| `01` memperluas `invites.role` CHECK (dapur/bar/ops/forecasting/`member`) | Owner bisa membuat invite role inventory; `accept_invite` lama menulis `invites.role` langsung ke `business_members.role` → CHECK gagal atau role salah |
-| `01` menambah `member` di `business_members.role` | Aman bagi legacy **hanya** jika invite inventory tidak dibuat lewat jalur lama |
-| `08` menambah `accept_invite_v2` / `claim_pending_invites_v2` | Aman (additive), tapi **tidak berguna** sampai app memanggil v2; invite inventory tetap butuh v2 |
+| `01_roles_and_member_assignments.sql` | CHECK role `member` + role invite inventory; tabel/helpers `member_assignments`, `upsert_member_assignment`, permission helpers |
+| `02_inventory_master.sql` | Lokasi / helper outlet yang dipakai v2 (`_location_id_for_outlet`, locations F&B) |
+| `08_invite_claim_transactional.sql` | **Additive:** `accept_invite_v2` / `claim_pending_invites_v2` saja — bergantung pada `01` + `02` |
 
-Karena itu: **jangan terapkan `01_roles_and_member_assignments.sql` dan
-`08_invite_claim_transactional.sql` sebelum gate di bawah lulus.**
+Karena itu staging/production apply invite path harus **`01 → 02 → 08`**, bukan
+deploy app v2 dulu. App tidak boleh memanggil RPC yang belum dibuat.
 
-File inventory lain (`02`–`07`) boleh direview terpisah; mereka tidak
-mengganti RPC invite. Urutan production tetap menunggu approve per file.
+## Prasyarat (sebelum apply SQL cutover)
 
-## Gate sebelum apply `01` / `08`
-
-Semua harus hijau:
-
-1. **App memanggil RPC v2** untuk accept/claim (bukan hanya deploy SQL v2).
-   - Accept token → `accept_invite_v2`
-   - Claim by email → `claim_pending_invites_v2`
-2. **Smoke test invite legacy lulus** di lingkungan yang sama dengan DB target
-   (lihat checklist di bawah) — memastikan RPC lama masih utuh dan role
-   finance (`admin` / `kasir` / `purchasing`) tidak rusak.
-3. **Tidak ada** `CREATE OR REPLACE` / `DROP` terhadap
-   `accept_invite` / `claim_pending_invites` di draft inventory.
-4. Owner approve eksplisit untuk file `01` dan `08`.
+1. **Role inventory belum boleh ditampilkan atau dibuat** dari aplikasi legacy
+   (UI invite / create-member hanya `admin` / `kasir` / `purchasing` seperti sekarang).
+2. Owner approve draft `01`, `02`, `08` untuk jendela cutover terkendali.
+3. Draft **tidak** berisi `CREATE OR REPLACE` / `DROP` terhadap
+   `accept_invite` / `claim_pending_invites`.
 
 ## Urutan cutover yang kompatibel
 
 ```
-A. Review & approve draft SQL (tanpa eksekusi)
-B. App PR terpisah: ganti pemanggilan → accept_invite_v2 / claim_pending_invites_v2
-   (revisi ini TIDAK mengubah file aplikasi)
-C. Deploy app yang sudah memanggil v2 (atau feature-flag dual-call yang
-   selesai cutover ke v2-only sebelum apply 01)
-D. Smoke test invite LEGACY (admin/kasir/purchasing) — harus lulus
-E. Smoke test invite INVENTORY via v2 (dapur/bar/ops/forecasting) — di staging
-F. Baru apply 01, lalu 08 (atau 01+08 dalam satu jendela setelah gate)
-G. Jangan hapus RPC legacy sampai Owner putuskan deprecation terpisah
+1. Role inventory BELUM ditampilkan / dibuat dari aplikasi legacy
+2. Staging: apply berurutan 01 → 02 → 08
+   (RPC accept_invite + claim_pending_invites legacy tetap utuh)
+3. Smoke test invite LEGACY (admin / kasir / purchasing) lewat RPC lama
+   → jika gagal: STOP + rollback SQL cutover (lihat di bawah)
+4. Deploy app PR terpisah yang memanggil RPC v2 (sebaiknya feature flag;
+   flag off = masih legacy; flag on = v2)
+5. Smoke test role LEGACY melalui v2 (admin / kasir / purchasing)
+6. Smoke test role INVENTORY melalui v2 (dapur / bar / ops / forecasting)
+7. Baru enable role inventory di UI / create-invite
+8. Production: urutan yang sama dalam satu controlled cutover
 ```
+
+Jangan hapus RPC legacy sampai Owner putuskan deprecation terpisah setelah
+production stabil.
+
+## Rollback / stop condition
+
+**Setelah apply `01 → 02 → 08` di staging (atau production), jika smoke test
+invite legacy (langkah 3) gagal → STOP segera.**
+
+Stop berarti:
+
+- Jangan deploy app yang memanggil v2.
+- Jangan enable role inventory di UI.
+- Jangan lanjut ke langkah 4–8.
+- Jangan apply file inventory lain di lingkungan yang sama sampai akar masalah jelas.
+
+Rollback SQL cutover invite (hanya di lingkungan yang baru di-apply; **bukan**
+dari PR review ini, dan **bukan** terhadap DB produksi di luar controlled window):
+
+1. Pastikan belum ada row `business_members.role = 'member'` dan belum ada
+   `member_assignments` / invite role inventory yang dibuat di jendela itu
+   (jika ada → rollback data dulu atau abort dan eskalasi Owner; jangan DROP buta).
+2. Jalankan bagian rollback yang relevan dari `99_ROLLBACK_ALL.sql` **hanya**
+   untuk objek yang di-apply di jendela cutover (`08` functions v2, lalu objek
+   `02`/`01` sesuai preflight ketat di file itu).
+3. Verifikasi ulang: `accept_invite` / `claim_pending_invites` masih ada dan
+   smoke legacy admin/kasir/purchasing hijau sebelum membuka traffic.
+
+Jika smoke legacy gagal **setelah** app v2 sudah ter-deploy: matikan feature
+flag (kembali ke RPC legacy), STOP enable inventory roles, lalu investigasi —
+jangan hapus RPC legacy.
 
 ## Kontrak kompatibilitas (wajib dipertahankan)
 
@@ -57,12 +85,11 @@ G. Jangan hapus RPC legacy sampai Owner putuskan deprecation terpisah
 - Unique `(business_id, user_id)` pada `business_members` tidak diubah.
 - `business_role()` / login / policy finance legacy tidak diganti di draft ini.
 
-## Smoke test invite legacy (wajib sebelum apply 01/08)
+## Smoke tests
 
-Jalankan sebagai authenticated user yang sesuai; **bukan** bagian dari revisi
-SQL ini (tidak ada eksekusi DB di PR draft).
+### A) Legacy RPC — wajib lulus segera setelah `01 → 02 → 08` (sebelum deploy app v2)
 
-- [ ] Invite `admin` → `accept_invite` → row `business_members.role = admin`, active
+- [ ] Invite `admin` → `accept_invite` → `business_members.role = admin`, active
 - [ ] Invite `kasir` + outlet → `accept_invite` → role kasir, outlet terisi
 - [ ] Invite `purchasing` → `accept_invite` → role purchasing
 - [ ] Login tanpa `?invite=` → `claim_pending_invites` klaim by email profil
@@ -70,15 +97,29 @@ SQL ini (tidak ada eksekusi DB di PR draft).
 - [ ] On conflict user sudah member → active/role/outlet ter-update seperti legacy
 - [ ] Omzet / kasir / admin keuangan / purchasing login setelah claim tetap jalan
 
-Setelah app di v2, ulang smoke di atas lewat **v2** untuk role legacy, plus:
+Jika salah satu gagal → **STOP + rollback** (bagian di atas).
 
-- [ ] Invite `dapur`/`bar`/`operasional_samtaro` → v2 → `business_members.role=member` + assignment + location
-- [ ] Invite `forecasting_inventory` → v2 → assignment business-wide (`location_id` null)
+### B) Legacy roles via v2 — setelah deploy app (flag on) di staging
+
+- [ ] Invite `admin` / `kasir` / `purchasing` diterima lewat `accept_invite_v2`
+- [ ] Claim by email lewat `claim_pending_invites_v2` untuk role legacy
+- [ ] Hasil `business_members` + login finance setara jalur legacy
+
+### C) Inventory roles via v2 — sebelum enable UI inventory
+
+- [ ] Invite `dapur` / `bar` / `operasional_samtaro` → v2 →
+      `business_members.role = member` + assignment + `location_id`
+- [ ] Invite `forecasting_inventory` → v2 → assignment business-wide
+      (`location_id` null)
 - [ ] Email invite tidak cocok dengan profil login → v2 menolak
 
-## Larangan di revisi SQL inventory
+Baru setelah A+B+C hijau: **enable role inventory** di aplikasi, lalu ulangi
+urutan yang sama untuk production dalam controlled cutover.
 
-- Jangan `CREATE OR REPLACE` RPC invite legacy.
-- Jangan ubah `lib/repo.js`, login, API invite, `app_state`, wallets, transactions,
-  atau policy RLS finance di PR draft ini.
-- Jangan buat migration timestamp sampai cutover app + approve Owner.
+## Larangan di revisi SQL inventory (PR draft)
+
+- Jangan `CREATE OR REPLACE` / drop RPC invite legacy.
+- Jangan ubah file aplikasi lama, `app_state`, wallets, transactions,
+  RPC login lama, atau policy RLS finance.
+- Jangan eksekusi SQL / seed / touch database produksi dari PR review.
+- Jangan buat migration timestamp sampai Owner approve + cutover terkendali.

@@ -97,10 +97,12 @@
 ### L) Invite email + cutover gate
 - Token invite email A dipakai akun email B → gagal (v2)  
 - Invite tanpa email (token-based) tetap bisa (v2)  
-- **Gate:** `01`/`08` belum boleh apply sampai app memanggil v2 dan smoke
-  invite legacy (`accept_invite` / `claim_pending_invites` untuk
-  admin/kasir/purchasing) lulus — lihat `INVITE_CUTOVER.md`  
-- Draft `08` **tidak** replace RPC legacy; keduanya harus tetap ada berdampingan
+- **Cutover:** role inventory belum di UI legacy → staging `01 → 02 → 08`
+  (RPC legacy utuh) → smoke legacy admin/kasir/purchasing → deploy app v2
+  (feature flag) → smoke legacy via v2 → smoke inventory via v2 → enable
+  role inventory → production controlled cutover (`INVITE_CUTOVER.md`)  
+- Setelah apply SQL, smoke legacy gagal → **STOP + rollback**; jangan deploy app v2  
+- Draft `08` **tidak** replace RPC legacy; keduanya tetap berdampingan
   sampai Owner deprecate terpisah  
 
 ### M) Rollback ketat

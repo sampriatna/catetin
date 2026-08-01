@@ -4,10 +4,11 @@
 --
 -- GATE CUTOVER INVITE (WAJIB):
 --   Additive saja: membuat accept_invite_v2 / claim_pending_invites_v2.
---   JANGAN CREATE OR REPLACE / DROP public.accept_invite atau
---   public.claim_pending_invites — RPC legacy wajib tetap ada.
---   Jangan terapkan file ini sebelum aplikasi memanggil RPC v2 dan
---   smoke test invite legacy lulus. Lihat: INVITE_CUTOVER.md
+--   Bergantung pada 01 (assignments/helpers) + 02 (location/outlet helpers).
+--   Apply cutover: 01 → 02 → 08. JANGAN CREATE OR REPLACE / DROP
+--   public.accept_invite / public.claim_pending_invites.
+--   Setelah apply: smoke legacy dulu; baru deploy app v2 (feature flag).
+--   Jika smoke legacy gagal → STOP + rollback. Lihat: INVITE_CUTOVER.md
 -- ============================================================================
 
 BEGIN;

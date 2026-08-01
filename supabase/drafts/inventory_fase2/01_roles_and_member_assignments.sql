@@ -3,12 +3,11 @@
 -- STATUS: JANGAN DIJALANKAN sampai Owner approve file ini
 --
 -- GATE CUTOVER INVITE (WAJIB):
---   File ini MEMPERLUAS invites.role / business_members.role CHECK.
---   JANGAN terapkan sebelum:
---     1) aplikasi memanggil accept_invite_v2 / claim_pending_invites_v2, DAN
---     2) smoke test invite legacy (accept_invite / claim_pending_invites) lulus.
---   Draft ini TIDAK mengganti RPC invite lama.
---   Lihat: INVITE_CUTOVER.md
+--   File ini MEMPERLUAS invites.role / business_members.role CHECK + assignments.
+--   Apply cutover: 01 → 02 → 08 (staging dulu). RPC legacy tetap utuh.
+--   Sebelum apply: role inventory BELUM ditampilkan/dibuat dari app legacy.
+--   Setelah apply: smoke invite legacy WAJIB hijau; jika gagal → STOP + rollback.
+--   Jangan deploy app v2 sebelum 01→02→08 ada. Lihat: INVITE_CUTOVER.md
 -- ============================================================================
 
 BEGIN;

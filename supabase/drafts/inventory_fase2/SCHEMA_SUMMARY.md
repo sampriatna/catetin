@@ -30,8 +30,8 @@ Residual IN_TRANSIT → resolve_transfer_variance
 ## Invite
 
 - Legacy: `accept_invite` / `claim_pending_invites` — **tetap** (tidak diganti di draft)
-- Baru: `accept_invite_v2` / `claim_pending_invites_v2` — additive
-- Gate apply `01`/`08`: lihat `INVITE_CUTOVER.md`
+- Baru: `accept_invite_v2` / `claim_pending_invites_v2` — additive; butuh `01` + `02`
+- Cutover: `01 → 02 → 08` dulu, baru app v2 — lihat `INVITE_CUTOVER.md`
 
 ## Compensation
 
