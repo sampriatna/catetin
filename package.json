@@ -6,6 +6,7 @@
     "dev": "next dev -p 3001",
     "build": "next build",
     "test:kasir": "node lib/kasirHarian.test.mjs && node lib/kasirHarian.idempotency.test.mjs",
+    "audit:kisamen": "node scripts/auditKisamenAug2026.mjs",
     "test:sdm": "node lib/sdmHarian.test.mjs",
     "test:laporan": "node lib/laporanKeuangan.test.mjs",
     "import:purchasing": "node scripts/importPurchasingExcel.mjs",
