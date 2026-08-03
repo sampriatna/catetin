@@ -85,14 +85,9 @@ Jalankan di Supabase SQL Editor:
 
 `supabase/audit-kisamen-aug2026.sql`
 
-Script Node opsional (perlu `.env.local` + service role):
+**Hasil aktual production:** lihat `docs/AUDIT_KISAMEN_LAPORAN_AUG2026_RESULTS.md`.
 
-```bash
-node scripts/diagSyncReports.mjs
-# atau filter manual di hasil query SQL di atas
-```
-
-**Jangan** jalankan script `fix*.mjs` atau UPDATE sebelum meninjau hasil audit.
+> Catatan (2026-08-03): agent cloud **belum** bisa menjalankan Query 0–8 ke production karena tidak ada `SUPABASE_SERVICE_ROLE_KEY` / `.env.local`, dan key publishable terblokir RLS (`app_state` → `[]`). Jangan anggap hasil kosong sebagai “laporan tidak ada”.
 
 ---
 
