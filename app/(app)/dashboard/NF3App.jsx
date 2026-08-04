@@ -3838,6 +3838,7 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
   const syncDateRef = useRef(date);
   const submittingRef = useRef(false);
   const submitSuccessRef = useRef(false);
+  const allowRetryRef = useRef(false);
   const successBannerRef = useRef(null);
   const submissionIdRef = useRef(null);
   const lastReportRef = useRef(lastReport);
@@ -3867,6 +3868,7 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
       syncDateRef.current = date;
       draftDirtyRef.current = false;
       submitSuccessRef.current = false;
+      allowRetryRef.current = false;
       submissionIdRef.current = null;
       setSubmitSuccess(false);
     }
@@ -3879,6 +3881,7 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
       }
       submitSuccessRef.current = false;
       submittingRef.current = false;
+      allowRetryRef.current = false;
       setSubmitSuccess(false);
       setSubmitted(false);
       setLastReport(null);
@@ -3892,6 +3895,8 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
     }
 
     if (submitSuccessRef.current) return;
+    // Setelah gagal simpan awan: jangan kunci form lagi dari sync state
+    if (allowRetryRef.current) return;
     const forceSync = reportAwaitingKasirRevision(rep, s.staffMessages, user.outlet);
     if (!dateChanged && draftDirtyRef.current && !submitted && !forceSync) return;
 
@@ -3925,7 +3930,17 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
     && existingReport
     && !["settled", "admin_verified"].includes(existingReport.status);
 
+  const unlockSubmitForRetry = (message) => {
+    allowRetryRef.current = true;
+    submitSuccessRef.current = false;
+    submittingRef.current = false;
+    setSubmitSuccess(false);
+    setSubmitted(false);
+    setErr(message || "Gagal menyimpan laporan. Silakan kirim ulang.");
+  };
+
   const finishSubmitSuccess = (saved, { resubmit = false } = {}) => {
+    allowRetryRef.current = false;
     submitSuccessRef.current = true;
     setSubmitSuccess(true);
     setSubmitted(true);
@@ -3938,7 +3953,6 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
       "success"
     );
     setTimeout(() => successBannerRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" }), 80);
-    try { onCriticalSave?.(); } catch { /* ignore */ }
   };
 
   const doDeleteOwn = () => {
@@ -3977,7 +3991,7 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
     }
   };
 
-  const submit = () => {
+  const submit = async () => {
     if (submittingRef.current || submitting || submitSuccess) return;
     submittingRef.current = true;
     setErr("");
@@ -3985,6 +3999,7 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
 
     if (!submissionIdRef.current) {
       submissionIdRef.current = makeDailyReportSubmissionId({
+        businessId: s?.businessId || s?.profile?.businessId || null,
         outlet: user?.outlet,
         date,
         userId: user?.id,
@@ -4003,6 +4018,7 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
         physicalCashEnd: physicalCashEnd || null,
         date,
         user,
+        businessId: s?.businessId || s?.profile?.businessId || null,
         submissionId,
         idempotencyKey: submissionId,
       };
@@ -4012,13 +4028,19 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
         reportDate: date,
         isRevision: !!(isRevision && existingReport),
       });
+      let saved = null;
+      let resubmit = false;
       if (isRevision && existingReport) {
         const { report, txs, removeIds } = resubmitDailyReport({ ...s, currentUser: user }, existingReport.id, payload);
         const fulfilledAt = report.resubmittedAt || new Date().toISOString();
-        const saved = { ...report, opsNote: opsNote.trim(), dailyTargetAtSubmit: dailyTarget || null };
+        saved = { ...report, opsNote: opsNote.trim(), dailyTargetAtSubmit: dailyTarget || null };
+        resubmit = true;
+        const reAddIds = new Set((txs || []).map((t) => t.id));
         mutate(d => {
           applyDailyReportMutation(d, { report: saved, txs, removeIds });
-          removeIds.forEach(id => applyTransactionDelete(d, id));
+          (removeIds || []).forEach((id) => {
+            if (!reAddIds.has(id)) applyTransactionDelete(d, id);
+          });
           if (user?.id) {
             d.staffMessages = resolveRevisionMessages(d.staffMessages, existingReport.id, user.id, existingReport.date, fulfilledAt);
           }
@@ -4029,12 +4051,16 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
             d.staffMessages = prependStaffMessage(d.staffMessages, ack, d.notificationPrefs);
           } catch { /* ignore */ }
         });
-        finishSubmitSuccess(saved, { resubmit: true });
       } else {
-        const { report, txs, idempotent } = submitDailyReport({ ...s, currentUser: user }, payload);
-        const saved = { ...report, opsNote: opsNote.trim(), dailyTargetAtSubmit: dailyTarget || null };
+        const { report, txs, idempotent, removeIds = [] } = submitDailyReport({ ...s, currentUser: user }, payload);
+        saved = { ...report, opsNote: opsNote.trim(), dailyTargetAtSubmit: dailyTarget || null };
+        const applyTxs = idempotent ? [] : txs;
+        const reAddIds = new Set((applyTxs || []).map((t) => t.id));
         mutate(d => {
-          applyDailyReportMutation(d, { report: saved, txs: idempotent ? [] : txs });
+          applyDailyReportMutation(d, { report: saved, txs: applyTxs, removeIds });
+          (removeIds || []).forEach((id) => {
+            if (!reAddIds.has(id)) applyTransactionDelete(d, id);
+          });
           if (!idempotent) {
             try {
               const nmsg = createDailyReportSubmittedMessage({ report: saved, author: user, resubmit: false });
@@ -4042,8 +4068,19 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
             } catch { /* ignore */ }
           }
         });
-        finishSubmitSuccess(saved);
       }
+
+      // Jangan anggap berhasil sebelum critical save ke awan selesai (atau skip jika tidak ada).
+      if (typeof onCriticalSave === "function") {
+        await onCriticalSave();
+      }
+      logDailyReportStage("ui_submit_persisted", {
+        submissionId,
+        reportId: saved?.id,
+        outletId: user?.outlet,
+        reportDate: date,
+      });
+      finishSubmitSuccess(saved, { resubmit });
     } catch (e) {
       logDailyReportStage("ui_submit_error", {
         submissionId,
@@ -4051,9 +4088,10 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
         reportDate: date,
         error: e.message || String(e),
       });
-      setErr(e.message || "Gagal menyimpan laporan");
-      showActionToast(e.message || "Gagal menyimpan laporan", "error");
-      // Pertahankan submissionId agar retry memakai kunci yang sama
+      const msg = e.message || "Gagal menyimpan laporan. Silakan kirim ulang.";
+      unlockSubmitForRetry(msg);
+      showActionToast(msg, "error");
+      // Pertahankan submissionId agar retry memakai kunci yang sama (bukan kunci baru)
     } finally {
       setSubmitting(false);
       if (!submitSuccessRef.current) submittingRef.current = false;
@@ -4211,7 +4249,33 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
           </Card>
         )}
 
-        {err && <div style={{ marginTop: 12, padding: 12, borderRadius: 10, background: "var(--out-soft)", color: "var(--out-text)", fontSize: 13 }}>{err}</div>}
+        {err && (
+          <div style={{ marginTop: 12, padding: 12, borderRadius: 10, background: "var(--out-soft)", color: "var(--out-text)", fontSize: 13 }}>
+            <div>{err}</div>
+            {!showSubmittedLock && (
+              <button
+                type="button"
+                disabled={!ready || submitting}
+                onClick={submit}
+                style={{
+                  marginTop: 10,
+                  width: "100%",
+                  padding: 11,
+                  borderRadius: 10,
+                  border: "1px solid var(--out-text)",
+                  background: "var(--surface)",
+                  color: "var(--out-text)",
+                  fontWeight: 700,
+                  fontSize: 13,
+                  cursor: ready && !submitting ? "pointer" : "default",
+                  opacity: ready && !submitting ? 1 : 0.65,
+                }}
+              >
+                {submitting ? "⏳ Menyimpan ulang…" : "Coba kirim ulang (aman)"}
+              </button>
+            )}
+          </div>
+        )}
         {canDeleteOwn && !submitting && (
           <button type="button" onClick={doDeleteOwn}
             style={{ width: "100%", marginTop: 12, marginBottom: 4, padding: 12, borderRadius: 12, border: "1px solid var(--out-soft)", background: "var(--surface)", color: "var(--out-text)", fontWeight: 700, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
@@ -7512,11 +7576,17 @@ export default function NF3App(props) {
     if (opts.critical === true) {
       criticalSaveUntilRef.current = Date.now() + CRITICAL_SAVE_WINDOW_MS;
     }
-    queueMicrotask(() => {
-      if (!sRef.current || !bizId || skipSaveRef.current || !allowSaveRef.current) return;
-      pendingSavePayloadRef.current = extractSavePayload(sRef.current);
-      clearTimeout(saveDebounceRef.current);
-      flushSave();
+    return new Promise((resolve, reject) => {
+      queueMicrotask(() => {
+        if (!sRef.current || !bizId || skipSaveRef.current || !allowSaveRef.current) {
+          resolve(null);
+          return;
+        }
+        pendingSavePayloadRef.current = extractSavePayload(sRef.current);
+        clearTimeout(saveDebounceRef.current);
+        flushSave();
+        saveQueueRef.current.then(resolve).catch(reject);
+      });
     });
   }, [bizId, flushSave]);
 
