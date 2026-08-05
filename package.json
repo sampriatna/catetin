@@ -8,6 +8,7 @@
     "test:kasir": "node lib/kasirHarian.test.mjs && node lib/kasirHarian.idempotency.test.mjs",
     "test:sdm": "node lib/sdmHarian.test.mjs",
     "test:laporan": "node lib/laporanKeuangan.test.mjs",
+    "audit:ksm-smt": "node scripts/auditKsmSmtAug2026.mjs",
     "import:purchasing": "node scripts/importPurchasingExcel.mjs",
     "scan:item-aliases": "node scripts/scanItemAliases.mjs",
     "start": "next start"
