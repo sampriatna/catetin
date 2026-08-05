@@ -3789,7 +3789,7 @@ function SdmHarianScreen({ s, mutate, onClose }) {
 }
 
 // ─── Laporan Omset Harian (kasir) ──────────────────────────
-function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalSave = null }) {
+function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalSave = null, businessId = null }) {
   const user = s.currentUser;
   const cur = s.profile.currency;
   const cfg = getOutletConfig(s.outletConfig, user.outlet);
@@ -3991,6 +3991,24 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
     }
   };
 
+  const resolvedBizId = businessId || s?.businessId || s?.profile?.businessId || null;
+  const submissionStorageKey = user?.outlet && date
+    ? `nf3_dr_sub|${resolvedBizId || "biz"}|${user.outlet}|${date}`
+    : null;
+
+  const readStoredSubmissionId = () => {
+    if (!submissionStorageKey || typeof sessionStorage === "undefined") return null;
+    try { return sessionStorage.getItem(submissionStorageKey); } catch { return null; }
+  };
+  const writeStoredSubmissionId = (id) => {
+    if (!submissionStorageKey || !id || typeof sessionStorage === "undefined") return;
+    try { sessionStorage.setItem(submissionStorageKey, id); } catch { /* ignore */ }
+  };
+  const clearStoredSubmissionId = () => {
+    if (!submissionStorageKey || typeof sessionStorage === "undefined") return;
+    try { sessionStorage.removeItem(submissionStorageKey); } catch { /* ignore */ }
+  };
+
   const submit = async () => {
     if (submittingRef.current || submitting || submitSuccess) return;
     submittingRef.current = true;
@@ -3998,15 +4016,18 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
     setSubmitting(true);
 
     if (!submissionIdRef.current) {
-      submissionIdRef.current = makeDailyReportSubmissionId({
-        businessId: s?.businessId || s?.profile?.businessId || null,
+      submissionIdRef.current = readStoredSubmissionId() || makeDailyReportSubmissionId({
+        businessId: resolvedBizId,
         outlet: user?.outlet,
         date,
         userId: user?.id,
       });
+      writeStoredSubmissionId(submissionIdRef.current);
     }
     const submissionId = submissionIdRef.current;
 
+    let saved = null;
+    let resubmit = false;
     try {
       const payload = {
         channels: Object.fromEntries(
@@ -4018,7 +4039,7 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
         physicalCashEnd: physicalCashEnd || null,
         date,
         user,
-        businessId: s?.businessId || s?.profile?.businessId || null,
+        businessId: resolvedBizId,
         submissionId,
         idempotencyKey: submissionId,
       };
@@ -4028,8 +4049,6 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
         reportDate: date,
         isRevision: !!(isRevision && existingReport),
       });
-      let saved = null;
-      let resubmit = false;
       if (isRevision && existingReport) {
         const { report, txs, removeIds } = resubmitDailyReport({ ...s, currentUser: user }, existingReport.id, payload);
         const fulfilledAt = report.resubmittedAt || new Date().toISOString();
@@ -4072,6 +4091,7 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
 
       // Jangan anggap berhasil sebelum critical save ke awan selesai (atau skip jika tidak ada).
       if (typeof onCriticalSave === "function") {
+        showActionToast("Sedang mengirim…", "info", 2500);
         await onCriticalSave();
       }
       logDailyReportStage("ui_submit_persisted", {
@@ -4080,15 +4100,32 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
         outletId: user?.outlet,
         reportDate: date,
       });
+      clearStoredSubmissionId();
       finishSubmitSuccess(saved, { resubmit });
     } catch (e) {
+      const errText = e.message || String(e);
+      const maybeTimeout = /timeout|network|failed to fetch|offline|gagal menyimpan|simpan/i.test(errText);
       logDailyReportStage("ui_submit_error", {
         submissionId,
         outletId: user?.outlet,
         reportDate: date,
-        error: e.message || String(e),
+        error: errText,
       });
-      const msg = e.message || "Gagal menyimpan laporan. Silakan kirim ulang.";
+
+      // Timeout setelah mutate lokal: laporan mungkin sudah ada — cek dulu sebelum minta kirim baru
+      if (maybeTimeout && saved?.id) {
+        showActionToast("Koneksi terputus, sedang memeriksa status…", "info", 3500);
+        try {
+          if (typeof onCriticalSave === "function") await onCriticalSave();
+          clearStoredSubmissionId();
+          finishSubmitSuccess(saved, { resubmit });
+          return;
+        } catch { /* fall through */ }
+      }
+
+      const msg = maybeTimeout
+        ? "Koneksi terputus saat menyimpan. Jangan buat laporan baru — ketuk kirim ulang (submissionId sama)."
+        : (errText || "Gagal menyimpan laporan. Silakan kirim ulang.");
       unlockSubmitForRetry(msg);
       showActionToast(msg, "error");
       // Pertahankan submissionId agar retry memakai kunci yang sama (bukan kunci baru)
@@ -4577,7 +4614,7 @@ function TodayOmsetPanel({ reports, dateStr, cur }) {
   );
 }
 
-function SettleLaporanScreen({ s, mutate, onClose, onCriticalSave = null }) {
+function SettleLaporanScreen({ s, mutate, onClose, onCriticalSave = null, onReloadFromCloud = null }) {
   const user = s.currentUser;
   const cur = s.profile.currency;
   const todayStr = today();
@@ -4672,7 +4709,7 @@ function SettleLaporanScreen({ s, mutate, onClose, onCriticalSave = null }) {
     setBusy(null); busyRef.current = null;
   };
 
-  const doDelete = (report) => {
+  const doDelete = async (report) => {
     if (busyRef.current) return;
     const label = `${OUTLET_LABEL[report.outlet] || report.outlet} · ${shortDate(report.date)}`;
     const txCount = collectAllDailyReportTxIds(s.transactions, report).length;
@@ -4684,7 +4721,12 @@ function SettleLaporanScreen({ s, mutate, onClose, onCriticalSave = null }) {
     try {
       const { report: deleted, removeIds } = deleteDailyReport(s, report.id, user);
       mutate(d => {
+        // Hapus dari sumber data (bukan hanya status UI)
         d.dailyReports = (d.dailyReports || []).filter(r => r.id !== deleted.id);
+        // Juga buang duplikat slot yang sama (jaga-jaga)
+        d.dailyReports = (d.dailyReports || []).filter(r =>
+          !(r.outlet === deleted.outlet && r.date === deleted.date && r.id !== deleted.id && r.status === "revision_requested")
+        );
         removeIds.forEach(id => applyTransactionDelete(d, id));
         recordDailyReportDelete(d, deleted);
         d.staffMessages = cancelRevisionMessagesForReport(
@@ -4697,10 +4739,31 @@ function SettleLaporanScreen({ s, mutate, onClose, onCriticalSave = null }) {
       });
       setRevisingId(null);
       setRevisionNote("");
-      try { onCriticalSave?.(); } catch { /* ignore */ }
+      if (typeof onCriticalSave === "function") {
+        await onCriticalSave();
+      }
+      logDailyReportStage("ui_delete_persisted", {
+        action: "delete",
+        result: "ok",
+        reportId: deleted.id,
+        outletCode: deleted.outlet,
+        reportDate: deleted.date,
+        reportKey: deleted.reportKey || null,
+      });
+      // Fetch ulang tanpa mengandalkan cache lokal saja
+      if (typeof onReloadFromCloud === "function") {
+        try { await onReloadFromCloud({ manual: true }); } catch { /* ignore */ }
+      }
       showActionToast(`Laporan ${label} dihapus — kasir bisa kirim ulang.`, "success");
     } catch (e) {
       setErr(e.message || "Gagal hapus laporan");
+      showActionToast(e.message || "Gagal hapus laporan", "error");
+      logDailyReportStage("ui_delete_error", {
+        action: "delete",
+        result: "error",
+        reportId: report.id,
+        error: e.message || String(e),
+      });
     }
     setBusy(null); busyRef.current = null;
   };
@@ -7968,8 +8031,8 @@ export default function NF3App(props) {
         {overlay === "sosmedHarian" && features.sosmedReports && canInputSosmed(user, s?.sosmedConfig) && <SosmedHarianScreen s={view} mutate={mutate} onClose={() => setOverlay(null)} user={user} />}
         {overlay === "sosmedConfig" && features.sosmedReports && canDo(user.role, "settleLaci") && <SosmedConfigScreen s={view} mutate={mutate} onClose={() => setOverlay(null)} />}
         {overlay === "sdmHarian" && features.kasirDaily && canDo(user.role, "inputLaporanHarian") && <SdmHarianScreen s={view} mutate={mutate} onClose={() => setOverlay(null)} />}
-        {overlay === "laporanHarian" && features.kasirDaily && canDo(user.role, "inputLaporanHarian") && <KasirHarianScreen key={`${laporanOpenSeq}-${laporanInitialDate || "today"}`} s={view} mutate={mutate} initialDate={laporanInitialDate} onCriticalSave={() => scheduleImmediateSave({ critical: true })} onClose={() => { setLaporanInitialDate(null); setOverlay(null); }} />}
-        {overlay === "settleLaporan" && features.settleLaci && canDo(user.role, "settleLaci") && <SettleLaporanScreen s={view} mutate={mutate} onCriticalSave={() => scheduleImmediateSave({ critical: true })} onClose={() => setOverlay(null)} />}
+        {overlay === "laporanHarian" && features.kasirDaily && canDo(user.role, "inputLaporanHarian") && <KasirHarianScreen key={`${laporanOpenSeq}-${laporanInitialDate || "today"}`} s={view} mutate={mutate} initialDate={laporanInitialDate} businessId={bizId} onCriticalSave={() => scheduleImmediateSave({ critical: true })} onClose={() => { setLaporanInitialDate(null); setOverlay(null); }} />}
+        {overlay === "settleLaporan" && features.settleLaci && canDo(user.role, "settleLaci") && <SettleLaporanScreen s={view} mutate={mutate} onCriticalSave={() => scheduleImmediateSave({ critical: true })} onReloadFromCloud={(opts) => reloadFromCloud(opts)} onClose={() => setOverlay(null)} />}
         {overlay === "outletTargets" && features.settleLaci && canDo(user.role, "settleLaci") && <OutletTargetSettingsScreen s={view} mutate={mutate} onClose={() => setOverlay(null)} />}
         {overlay === "reportChannels" && features.settleLaci && canDo(user.role, "settleLaci") && <ReportChannelSettingsScreen s={view} mutate={mutate} onClose={() => setOverlay(null)} />}
         {overlay === "mpStores" && features.nfChannelFinance && canDo(user.role, "kelolaKategoriSemua") && <MpStoreSettingsScreen s={view} mutate={mutate} onClose={() => setOverlay(null)} />}
