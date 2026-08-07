@@ -47,10 +47,10 @@ import { walletOptionLabel, walletBalanceDisplay, walletsForSaldoTotal, shouldHi
 import { getAccountUi, navConfig } from "../../../lib/accountUi";
 import {
   getPeriodBounds, shiftAnchor, filterTransactions, buildCashflowChart,
-  sumInOut, formatPeriodLabel, localISO,
+  sumInOut, formatPeriodLabel, localISO, todayLocal,
 } from "../../../lib/laporanKeuangan";
 import { computeNfProfit } from "../../../lib/nfProfitReport";
-import { submitDailyReport, resubmitDailyReport, settleDailyReport, verifyDailyReportAdmin, requestDailyReportRevision, deleteDailyReport, collectAllDailyReportTxIds, pendingReports, reportsAwaitingVerify, reportsReadyToSettle, reportsAwaitingRevision, reportsForDate, findPendingRevisionReport, reportAwaitingKasirRevision, reportCashAmount, reportSettleUrgency, reportSettleDeadlineLabel, reconcileDailyReports, allDailyReportsForAdmin, applyDailyReportMutation, makeDailyReportSubmissionId, logDailyReportStage, LACI_BY_OUTLET, LACI_FLOOR } from "../../../lib/kasirHarian";
+import { submitDailyReport, resubmitDailyReport, settleDailyReport, verifyDailyReportAdmin, requestDailyReportRevision, deleteDailyReport, collectAllDailyReportTxIds, pendingReports, reportsAwaitingVerify, reportsReadyToSettle, reportsAwaitingRevision, reportsForDate, findPendingRevisionReport, reportAwaitingKasirRevision, reportCashAmount, reportSettleUrgency, reportSettleDeadlineLabel, reconcileDailyReports, allDailyReportsForAdmin, applyDailyReportMutation, makeDailyReportSubmissionId, logDailyReportStage, LACI_BY_OUTLET, LACI_FLOOR, hasOrphanLaporanCashSlot, findCommittedDailyReport, recoverDailyReportFromOrphanCash } from "../../../lib/kasirHarian";
 import { submitVoidLog, pendingVoidLogs, reviewVoidLog, visibleVoidLogs, VOID_TYPES } from "../../../lib/voidLog";
 import {
   submitSdmReport, buildSdmSnapshot, getOutletConfig, todaySdmReport,
@@ -246,10 +246,24 @@ const walletFloorHint = (bal, floor) => {
   if (b <= f * 1.2) return "Mendekati minimum";
   return null;
 };
-const today = () => localISO(new Date());
+/** Tanggal bisnis hari ini — selalu Asia/Jakarta (bukan UTC / TZ perangkat asing). */
+const today = () => todayLocal();
 const dayLabel = (d) => new Date(d + "T12:00:00").toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 const shortDate = (d) => new Date(d + "T12:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short" });
-const isoOffset = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return localISO(d); };
+const isoOffset = (n) => {
+  const base = todayLocal();
+  const [y, m, d] = base.split("-").map(Number);
+  const dt = new Date(y, (m || 1) - 1, (d || 1) + n);
+  return localISO(dt);
+};
+
+/** Checklist hijau hanya jika sudah committed (bukan sekadar mutate lokal). Legacy tanpa field = committed. */
+function isSectionCloudCommitted(row) {
+  if (!row) return false;
+  const st = row.commitStatus;
+  if (st === "committing" || st === "failed" || st === "pending") return false;
+  return true;
+}
 
 /** Label waktu singkat untuk bar sync (WIB = jam lokal perangkat). */
 const formatSyncClock = (iso) => {
@@ -1336,6 +1350,9 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
   const todayReport = user.role === "kasir"
     ? (s.dailyReports || []).find(r => r.outlet === user.outlet && r.date === today() && r.status !== "settled")
     : null;
+  const orphanOmsetToday = user.role === "kasir" && !todayReport
+    ? hasOrphanLaporanCashSlot(s, user.outlet, today())
+    : false;
   const pendingRevisionReport = user.role === "kasir"
     ? findPendingRevisionReport(s.dailyReports, user.outlet, s.staffMessages)
     : null;
@@ -1776,10 +1793,15 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
             {
               id: "sdm",
               title: "SDM Pagi",
-              subtitle: todaySdm
-                ? `${todaySdm.headcount} orang masuk · target ${fmtMoney(todaySdm.targetOmset, cur)}`
-                : `Berapa orang masuk kerja? ${SDM_HINT[user.outlet] || "Isi angka saja"}`,
-              done: !!todaySdm,
+              subtitle: todaySdm?.commitStatus === "committing"
+                ? "Sedang mengirim ke awan…"
+                : todaySdm?.commitStatus === "failed"
+                  ? "Gagal ke awan — tap untuk kirim ulang (jangan anggap selesai)"
+                : todaySdm
+                  ? `${todaySdm.headcount} orang masuk · target ${fmtMoney(todaySdm.targetOmset, cur)}`
+                  : `Berapa orang masuk kerja? ${SDM_HINT[user.outlet] || "Isi angka saja"}`,
+              done: isSectionCloudCommitted(todaySdm),
+              urgent: todaySdm?.commitStatus === "failed",
               onClick: () => setOverlay("sdmHarian"),
             },
             {
@@ -1787,17 +1809,23 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
               title: "Laporan Omset",
               subtitle: needsRevision
                 ? `Revisi wajib (${shortDate(needsRevision.date)}) — ${needsRevision.revisionNote || "perbaiki sesuai catatan admin"}`
+                : todayReport?.commitStatus === "committing"
+                  ? "Sedang mengirim ke awan…"
+                  : todayReport?.commitStatus === "failed"
+                    ? "Gagal ke awan — jangan isi baru, tap kirim ulang"
                 : todayReport
                   ? todayReport.status === "admin_verified"
                     ? `Total ${fmtMoney(todayReport.total, cur)} · menunggu settle owner/admin`
                     : todayReport.status === "submitted"
                       ? `Total ${fmtMoney(todayReport.total, cur)} · menunggu verifikasi admin pagi`
                       : `Total ${fmtMoney(todayReport.total, cur)} · tercatat`
+                  : orphanOmsetToday
+                    ? "Omset di laci tanpa laporan — tap sync/pulihkan, jangan isi dobel"
                   : todaySdm
                     ? `Target ${fmtMoney(dailyTarget, cur)} · isi per channel pembayaran`
                     : "Tap untuk isi · backfill tanggal lalu boleh",
-              done: !!todayReport && !needsRevision,
-              urgent: !!needsRevision,
+              done: isSectionCloudCommitted(todayReport) && !needsRevision,
+              urgent: !!needsRevision || orphanOmsetToday || todayReport?.commitStatus === "failed",
               blocked: false,
               onClick: () => (onOpenLaporan ? onOpenLaporan(needsRevision?.date || null) : setOverlay("laporanHarian")),
             },
@@ -1806,10 +1834,15 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
             tasks.push({
               id: "sosmed",
               title: "Report Sosmed",
-              subtitle: todaySosmed
-                ? `${sosmedDisplayName(user.outlet)} · sudah dilaporkan hari ini`
-                : `${sosmedDisplayName(user.outlet)} · DM, komentar, review, komplain`,
-              done: !!todaySosmed,
+              subtitle: todaySosmed?.commitStatus === "committing"
+                ? "Sedang mengirim ke awan…"
+                : todaySosmed?.commitStatus === "failed"
+                  ? "Gagal ke awan — tap kirim ulang"
+                : todaySosmed
+                  ? `${sosmedDisplayName(user.outlet)} · sudah dilaporkan hari ini`
+                  : `${sosmedDisplayName(user.outlet)} · DM, komentar, review, komplain`,
+              done: isSectionCloudCommitted(todaySosmed),
+              urgent: todaySosmed?.commitStatus === "failed",
               onClick: () => setOverlay("sosmedHarian"),
             });
           }
@@ -3492,7 +3525,7 @@ function SosCheckRow({ label, checked, onChange }) {
   );
 }
 
-function SosmedHarianScreen({ s, mutate, onClose, user }) {
+function SosmedHarianScreen({ s, mutate, onClose, user, onCriticalSave = null }) {
   const role = user?.role || "kasir";
   const enabled = hydrateSosmedConfig(s.sosmedConfig).enabledOutlets;
   const [pickOutlet, setPickOutlet] = useState(resolveSosmedOutlet(user, enabled[0]));
@@ -3551,7 +3584,7 @@ function SosmedHarianScreen({ s, mutate, onClose, user }) {
   const setStarKey = (k, v) => setGoogleReviews(prev => ({ ...prev, [k]: v }));
   const setRepliedKey = (k, v) => setReplied(prev => ({ ...prev, [k]: v }));
 
-  const save = () => {
+  const save = async () => {
     setErr(""); setOk("");
     try {
       const { reports } = submitSosmedReport(s, {
@@ -3559,10 +3592,34 @@ function SosmedHarianScreen({ s, mutate, onClose, user }) {
         outlet, date, dm, comments, googleReviews, replied, wellDone,
         complaintsText, topQuestionsText: questionsText,
       }, user);
-      mutate(d => { d.sosmedReports = reports; });
-      setOk("Laporan sosmed tersimpan.");
+      const stamped = (reports || []).map((r) => (
+        r?.outlet === outlet && r?.date === date
+          ? { ...r, commitStatus: "committing" }
+          : r
+      ));
+      mutate(d => { d.sosmedReports = stamped; });
+      if (typeof onCriticalSave === "function") {
+        setOk("Sedang mengirim ke awan…");
+        await onCriticalSave();
+      }
+      mutate(d => {
+        d.sosmedReports = (d.sosmedReports || []).map((r) => (
+          r?.outlet === outlet && r?.date === date
+            ? { ...r, commitStatus: "committed", committedAt: new Date().toISOString() }
+            : r
+        ));
+      });
+      setOk("Laporan sosmed tersimpan di awan.");
     } catch (e) {
-      setErr(e.message || "Gagal menyimpan");
+      mutate(d => {
+        d.sosmedReports = (d.sosmedReports || []).map((r) => (
+          r?.outlet === outlet && r?.date === date
+            ? { ...r, commitStatus: "failed" }
+            : r
+        ));
+      });
+      setErr(e.message || "Gagal menyimpan ke awan — jangan anggap selesai.");
+      setOk("");
     }
   };
 
@@ -3698,7 +3755,7 @@ function SosmedConfigScreen({ s, mutate, onClose }) {
 }
 
 // ─── Input SDM Pagi (kasir) ────────────────────────────────
-function SdmHarianScreen({ s, mutate, onClose }) {
+function SdmHarianScreen({ s, mutate, onClose, onCriticalSave = null }) {
   const user = s.currentUser;
   const cur = s.profile.currency;
   const cfg = getOutletConfig(s.outletConfig, user.outlet);
@@ -3717,21 +3774,37 @@ function SdmHarianScreen({ s, mutate, onClose }) {
   const previewTarget = calcDailyOmsetTarget(headcountN, s.outletConfig, user.outlet);
   const canSave = headcountN > 0 && !saved;
 
-  const submit = () => {
+  const submit = async () => {
     setErr("");
     setSaving(true);
     try {
       const { report } = submitSdmReport({ ...s, currentUser: user }, {
         headcount: headcountN, date: today(), user, opsTags: [], opsNote,
       });
+      const pending = { ...report, commitStatus: "committing" };
       mutate(d => {
         if (!d.sdmReports) d.sdmReports = [];
-        d.sdmReports.push(report);
+        d.sdmReports.push(pending);
+      });
+      if (typeof onCriticalSave === "function") {
+        await onCriticalSave();
+      }
+      const committed = { ...pending, commitStatus: "committed", committedAt: new Date().toISOString() };
+      mutate(d => {
+        d.sdmReports = (d.sdmReports || []).map((r) => (r.id === pending.id ? committed : r));
       });
       setSaved(true);
-      setSavedReport(report);
+      setSavedReport(committed);
     } catch (e) {
-      setErr(e.message || "Gagal menyimpan SDM");
+      mutate(d => {
+        d.sdmReports = (d.sdmReports || []).map((r) => (
+          r?.date === today() && r?.outlet === user.outlet && r?.commitStatus === "committing"
+            ? { ...r, commitStatus: "failed" }
+            : r
+        ));
+      });
+      setErr(e.message || "Gagal menyimpan SDM ke awan — checklist belum selesai.");
+      setSaved(false);
     } finally {
       setSaving(false);
     }
@@ -3798,7 +3871,7 @@ function SdmHarianScreen({ s, mutate, onClose }) {
 }
 
 // ─── Laporan Omset Harian (kasir) ──────────────────────────
-function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalSave = null, businessId = null }) {
+function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalSave = null, onVerifyCommitted = null, businessId = null }) {
   const user = s.currentUser;
   const cur = s.profile.currency;
   const cfg = getOutletConfig(s.outletConfig, user.outlet);
@@ -4054,6 +4127,33 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
     let saved = null;
     let resubmit = false;
     try {
+      logDailyReportStage("STARTED", {
+        submissionId,
+        businessId: resolvedBizId,
+        outletCode: user?.outlet,
+        reportDate: date,
+        clientTimestamp: new Date().toISOString(),
+      });
+
+      // Orphan cash tanpa laporan: pulihkan stub dulu agar submit jadi upsert, bukan cash kedua
+      let stateForSubmit = { ...s, currentUser: user };
+      if (!existingReport && !isRevision && hasOrphanLaporanCashSlot(s, user?.outlet, date)) {
+        const { report: recovered } = recoverDailyReportFromOrphanCash(s, {
+          outlet: user?.outlet,
+          date,
+          user,
+          businessId: resolvedBizId,
+        });
+        stateForSubmit = {
+          ...stateForSubmit,
+          dailyReports: [...(s.dailyReports || []).filter((r) => !(r.outlet === recovered.outlet && r.date === recovered.date)), recovered],
+        };
+        mutate((d) => {
+          applyDailyReportMutation(d, { report: { ...recovered, commitStatus: "recovered" }, txs: [] });
+        });
+        showActionToast("Ditemukan omset di laci tanpa laporan — memulihkan lalu mengirim ulang (aman).", "info", 4500);
+      }
+
       const payload = {
         channels: Object.fromEntries(
           channels.map(c => {
@@ -4075,9 +4175,9 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
         isRevision: !!(isRevision && existingReport),
       });
       if (isRevision && existingReport) {
-        const { report, txs, removeIds } = resubmitDailyReport({ ...s, currentUser: user }, existingReport.id, payload);
+        const { report, txs, removeIds } = resubmitDailyReport(stateForSubmit, existingReport.id, payload);
         const fulfilledAt = report.resubmittedAt || new Date().toISOString();
-        saved = { ...report, opsNote: opsNote.trim(), dailyTargetAtSubmit: dailyTarget || null };
+        saved = { ...report, opsNote: opsNote.trim(), dailyTargetAtSubmit: dailyTarget || null, commitStatus: "committing" };
         resubmit = true;
         const reAddIds = new Set((txs || []).map((t) => t.id));
         mutate(d => {
@@ -4096,8 +4196,8 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
           } catch { /* ignore */ }
         });
       } else {
-        const { report, txs, idempotent, removeIds = [] } = submitDailyReport({ ...s, currentUser: user }, payload);
-        saved = { ...report, opsNote: opsNote.trim(), dailyTargetAtSubmit: dailyTarget || null };
+        const { report, txs, idempotent, removeIds = [] } = submitDailyReport(stateForSubmit, payload);
+        saved = { ...report, opsNote: opsNote.trim(), dailyTargetAtSubmit: dailyTarget || null, commitStatus: "committing" };
         const applyTxs = idempotent ? [] : txs;
         const reAddIds = new Set((applyTxs || []).map((t) => t.id));
         mutate(d => {
@@ -4114,37 +4214,102 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
         });
       }
 
-      // Jangan anggap berhasil sebelum critical save ke awan selesai (atau skip jika tidak ada).
+      // Jangan anggap berhasil sebelum critical save ke awan selesai.
       if (typeof onCriticalSave === "function") {
         showActionToast("Sedang mengirim…", "info", 2500);
+        logDailyReportStage("REPORT_SAVING", {
+          submissionId,
+          reportId: saved?.id,
+          outletCode: user?.outlet,
+          reportDate: date,
+        });
         await onCriticalSave();
       }
-      logDailyReportStage("ui_submit_persisted", {
+      logDailyReportStage("REPORT_SAVED", {
         submissionId,
         reportId: saved?.id,
-        outletId: user?.outlet,
+        outletCode: user?.outlet,
         reportDate: date,
+      });
+
+      // Read-back verification: laporan harus terbaca dari source of truth
+      if (typeof onVerifyCommitted === "function") {
+        showActionToast("Memverifikasi laporan di awan…", "info", 2500);
+        const verified = await onVerifyCommitted({
+          reportId: saved?.id,
+          reportKey: saved?.reportKey,
+          submissionId,
+          outlet: user?.outlet,
+          date,
+        });
+        if (!verified) {
+          throw new Error(
+            "Laporan belum terbaca di awan setelah simpan. Jangan isi ulang — tap ☁️ lalu kirim ulang (aman)."
+          );
+        }
+        saved = {
+          ...saved,
+          ...verified,
+          commitStatus: "committed",
+          committedAt: new Date().toISOString(),
+        };
+      } else {
+        saved = { ...saved, commitStatus: "committed", committedAt: new Date().toISOString() };
+      }
+
+      mutate((d) => {
+        applyDailyReportMutation(d, {
+          report: { ...saved, commitStatus: "committed", committedAt: saved.committedAt },
+          txs: [],
+        });
+      });
+
+      logDailyReportStage("COMMITTED", {
+        submissionId,
+        reportId: saved?.id,
+        outletCode: user?.outlet,
+        reportDate: date,
+        serverTimestamp: saved?.committedAt,
+        status: "committed",
       });
       clearStoredSubmissionId();
       finishSubmitSuccess(saved, { resubmit });
     } catch (e) {
       const errText = e.message || String(e);
-      const maybeTimeout = /timeout|network|failed to fetch|offline|gagal menyimpan|simpan/i.test(errText);
-      logDailyReportStage("ui_submit_error", {
+      const maybeTimeout = /timeout|network|failed to fetch|offline|gagal menyimpan|simpan|belum terbaca/i.test(errText);
+      logDailyReportStage("FAILED", {
         submissionId,
-        outletId: user?.outlet,
+        outletCode: user?.outlet,
         reportDate: date,
+        reportId: saved?.id || null,
         error: errText,
       });
 
-      // Timeout setelah mutate lokal: laporan mungkin sudah ada — cek dulu sebelum minta kirim baru
-      if (maybeTimeout && saved?.id) {
-        showActionToast("Koneksi terputus, sedang memeriksa status…", "info", 3500);
+      if (saved?.id) {
+        mutate((d) => {
+          applyDailyReportMutation(d, {
+            report: { ...saved, commitStatus: "failed" },
+            txs: [],
+          });
+        });
+      }
+
+      // Timeout setelah mutate lokal: coba read-back dulu — jangan false success tanpa ack
+      if (maybeTimeout && saved?.id && typeof onVerifyCommitted === "function") {
+        showActionToast("Koneksi terputus, sedang memeriksa status di awan…", "info", 3500);
         try {
-          if (typeof onCriticalSave === "function") await onCriticalSave();
-          clearStoredSubmissionId();
-          finishSubmitSuccess(saved, { resubmit });
-          return;
+          const verified = await onVerifyCommitted({
+            reportId: saved?.id,
+            reportKey: saved?.reportKey,
+            submissionId,
+            outlet: user?.outlet,
+            date,
+          });
+          if (verified) {
+            clearStoredSubmissionId();
+            finishSubmitSuccess({ ...saved, ...verified, commitStatus: "committed" }, { resubmit });
+            return;
+          }
         } catch { /* fall through */ }
       }
 
@@ -4153,7 +4318,6 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
         : (errText || "Gagal menyimpan laporan. Silakan kirim ulang.");
       unlockSubmitForRetry(msg);
       showActionToast(msg, "error");
-      // Pertahankan submissionId agar retry memakai kunci yang sama (bukan kunci baru)
     } finally {
       setSubmitting(false);
       if (!submitSuccessRef.current) submittingRef.current = false;
@@ -4655,7 +4819,7 @@ function SettleLaporanScreen({ s, mutate, onClose, onCriticalSave = null, onRelo
   const [revisingId, setRevisingId] = useState(null);
   const [revisionNote, setRevisionNote] = useState("");
 
-  const doVerify = (reportId) => {
+  const doVerify = async (reportId) => {
     if (busyRef.current) return;
     setErr(""); setBusy(reportId); busyRef.current = reportId;
     try {
@@ -4673,15 +4837,16 @@ function SettleLaporanScreen({ s, mutate, onClose, onCriticalSave = null, onRelo
       });
       setRevisingId(null);
       setRevisionNote("");
-      try { onCriticalSave?.(); } catch { /* ignore */ }
+      if (typeof onCriticalSave === "function") await onCriticalSave();
       showActionToast(`Laporan ${OUTLET_LABEL[updated.outlet] || updated.outlet} · ${shortDate(updated.date)} diverifikasi.`, "success");
     } catch (e) {
       setErr(e.message || "Gagal verifikasi");
+      showActionToast(e.message || "Gagal verifikasi ke awan", "error");
     }
     setBusy(null); busyRef.current = null;
   };
 
-  const doRevision = (reportId) => {
+  const doRevision = async (reportId) => {
     if (busyRef.current) return;
     setErr(""); setBusy(reportId); busyRef.current = reportId;
     try {
@@ -4694,15 +4859,16 @@ function SettleLaporanScreen({ s, mutate, onClose, onCriticalSave = null, onRelo
       });
       setRevisingId(null);
       setRevisionNote("");
-      try { onCriticalSave?.(); } catch { /* ignore */ }
+      if (typeof onCriticalSave === "function") await onCriticalSave();
       showActionToast(`Permintaan revisi dikirim ke kasir ${updated.outlet}.`, "success");
     } catch (e) {
       setErr(e.message || "Gagal minta revisi");
+      showActionToast(e.message || "Gagal minta revisi ke awan", "error");
     }
     setBusy(null); busyRef.current = null;
   };
 
-  const doSettle = (reportId) => {
+  const doSettle = async (reportId) => {
     if (busyRef.current) return;
     setErr(""); setBusy(reportId); busyRef.current = reportId;
     try {
@@ -4722,7 +4888,7 @@ function SettleLaporanScreen({ s, mutate, onClose, onCriticalSave = null, onRelo
           } catch { /* ignore */ }
         }
       });
-      try { onCriticalSave?.(); } catch { /* ignore */ }
+      if (typeof onCriticalSave === "function") await onCriticalSave();
       showActionToast(
         `Laporan ${OUTLET_LABEL[report.outlet] || report.outlet} · ${shortDate(report.date)} disettle · ${report.id}`,
         "success"
@@ -7156,44 +7322,55 @@ export default function NF3App(props) {
   );
 
   const flushSave = useCallback(() => {
-    if (!bizId || skipSaveRef.current || !allowSaveRef.current) return;
+    if (!bizId || skipSaveRef.current || !allowSaveRef.current) return Promise.resolve(null);
     const payload = pendingSavePayloadRef.current;
-    if (!payload) return;
+    if (!payload) return saveQueueRef.current.catch(() => null);
     const payloadKey = JSON.stringify(payload);
     if (lastSavePayloadRef.current === payloadKey) {
       pendingSavePayloadRef.current = null;
-      return;
+      return saveQueueRef.current.catch(() => null);
     }
     lastSavePayloadRef.current = payloadKey;
     pendingSavePayloadRef.current = null;
-    saveQueueRef.current = saveQueueRef.current
+
+    const savePromise = saveQueueRef.current
+      .catch(() => {}) // lanjut antrean meski save sebelumnya gagal
       .then(async () => {
-        if (skipSaveRef.current) return;
+        if (skipSaveRef.current) {
+          throw new Error("Simpan ditunda (sedang sync dari awan). Coba lagi sebentar.");
+        }
         const updatedAt = await saveState(bizId, payload);
         if (updatedAt) {
           lastOwnSaveAtRef.current = updatedAt;
           setS((prev) => (prev && !skipSaveRef.current ? { ...prev, _cloudUpdatedAt: updatedAt } : prev));
         }
-      })
-      .catch((e) => {
-        console.error(e);
-        lastSavePayloadRef.current = null;
-        setCloudSyncState("err");
-        setTimeout(() => setCloudSyncState("idle"), 4500);
-        playNotificationPing();
-        if (typeof navigator !== "undefined" && navigator.vibrate) {
-          try { navigator.vibrate([80, 60, 120]); } catch { /* ignore */ }
-        }
-        const errText = String(e?.message || "");
-        const networkHint = /timeout|network|failed to fetch|offline/i.test(errText)
-          ? "Indikasi jaringan lambat/putus."
-          : "";
-        showActionToast(
-          `Gagal simpan ke awan (${getActiveAccountLabel()}) — data masih di HP (jangan input ulang). ${networkHint} Tap ☁️ untuk retry.`,
-          "error",
-          7000
-        );
+        return updatedAt;
       });
+
+    // Side-effect toast pada gagal, lalu re-reject agar await scheduleImmediateSave gagal
+    // (mencegah false success / checklist hijau padahal awan belum commit).
+    saveQueueRef.current = savePromise.catch((e) => {
+      console.error(e);
+      lastSavePayloadRef.current = null;
+      setCloudSyncState("err");
+      setTimeout(() => setCloudSyncState("idle"), 4500);
+      playNotificationPing();
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        try { navigator.vibrate([80, 60, 120]); } catch { /* ignore */ }
+      }
+      const errText = String(e?.message || "");
+      const networkHint = /timeout|network|failed to fetch|offline/i.test(errText)
+        ? "Indikasi jaringan lambat/putus."
+        : "";
+      showActionToast(
+        `Gagal simpan ke awan (${getActiveAccountLabel()}) — data masih di HP (jangan input ulang). ${networkHint} Tap ☁️ untuk retry.`,
+        "error",
+        7000
+      );
+      return Promise.reject(e);
+    });
+
+    return savePromise;
   }, [bizId, getActiveAccountLabel]);
 
   const reloadFromCloud = useCallback(async (opts = {}) => {
@@ -7667,14 +7844,28 @@ export default function NF3App(props) {
     }
     return new Promise((resolve, reject) => {
       queueMicrotask(() => {
-        if (!sRef.current || !bizId || skipSaveRef.current || !allowSaveRef.current) {
-          resolve(null);
+        if (!bizId) {
+          if (opts.critical) reject(new Error("Belum ada bisnis aktif — tidak bisa simpan ke awan."));
+          else resolve(null);
+          return;
+        }
+        if (!sRef.current) {
+          if (opts.critical) reject(new Error("State lokal kosong — muat ulang lalu coba lagi."));
+          else resolve(null);
+          return;
+        }
+        if (skipSaveRef.current || !allowSaveRef.current) {
+          if (opts.critical) {
+            reject(new Error("Simpan kritis ditunda (sync sedang berjalan atau sesi belum siap). Tap ☁️ lalu coba lagi."));
+          } else {
+            resolve(null);
+          }
           return;
         }
         pendingSavePayloadRef.current = extractSavePayload(sRef.current);
         clearTimeout(saveDebounceRef.current);
-        flushSave();
-        saveQueueRef.current.then(resolve).catch(reject);
+        const p = flushSave();
+        Promise.resolve(p).then(resolve).catch(reject);
       });
     });
   }, [bizId, flushSave]);
@@ -8078,10 +8269,13 @@ export default function NF3App(props) {
         {overlay === "asisten" && features.purchasingModule && canUsePurchasingAsisten(user.role) && (
           <AsistenPurchasing s={view} bizId={bizId} onClose={() => setOverlay(null)} />
         )}
-        {overlay === "sosmedHarian" && features.sosmedReports && canInputSosmed(user, s?.sosmedConfig) && <SosmedHarianScreen s={view} mutate={mutate} onClose={() => setOverlay(null)} user={user} />}
+        {overlay === "sosmedHarian" && features.sosmedReports && canInputSosmed(user, s?.sosmedConfig) && <SosmedHarianScreen s={view} mutate={mutate} onClose={() => setOverlay(null)} user={user} onCriticalSave={() => scheduleImmediateSave({ critical: true })} />}
         {overlay === "sosmedConfig" && features.sosmedReports && canDo(user.role, "settleLaci") && <SosmedConfigScreen s={view} mutate={mutate} onClose={() => setOverlay(null)} />}
-        {overlay === "sdmHarian" && features.kasirDaily && canDo(user.role, "inputLaporanHarian") && <SdmHarianScreen s={view} mutate={mutate} onClose={() => setOverlay(null)} />}
-        {overlay === "laporanHarian" && features.kasirDaily && canDo(user.role, "inputLaporanHarian") && <KasirHarianScreen key={`${laporanOpenSeq}-${laporanInitialDate || "today"}`} s={view} mutate={mutate} initialDate={laporanInitialDate} businessId={bizId} onCriticalSave={() => scheduleImmediateSave({ critical: true })} onClose={() => { setLaporanInitialDate(null); setOverlay(null); }} />}
+        {overlay === "sdmHarian" && features.kasirDaily && canDo(user.role, "inputLaporanHarian") && <SdmHarianScreen s={view} mutate={mutate} onClose={() => setOverlay(null)} onCriticalSave={() => scheduleImmediateSave({ critical: true })} />}
+        {overlay === "laporanHarian" && features.kasirDaily && canDo(user.role, "inputLaporanHarian") && <KasirHarianScreen key={`${laporanOpenSeq}-${laporanInitialDate || "today"}`} s={view} mutate={mutate} initialDate={laporanInitialDate} businessId={bizId} onCriticalSave={() => scheduleImmediateSave({ critical: true })} onVerifyCommitted={async (q) => {
+          const cloudDoc = await loadState(bizId, { businessType: business?.type, business });
+          return findCommittedDailyReport(cloudDoc, q);
+        }} onClose={() => { setLaporanInitialDate(null); setOverlay(null); }} />}
         {overlay === "settleLaporan" && features.settleLaci && canDo(user.role, "settleLaci") && <SettleLaporanScreen s={view} mutate={mutate} onCriticalSave={() => scheduleImmediateSave({ critical: true })} onReloadFromCloud={(opts) => reloadFromCloud(opts)} onClose={() => setOverlay(null)} />}
         {overlay === "outletTargets" && features.settleLaci && canDo(user.role, "settleLaci") && <OutletTargetSettingsScreen s={view} mutate={mutate} onClose={() => setOverlay(null)} />}
         {overlay === "reportChannels" && features.settleLaci && canDo(user.role, "settleLaci") && <ReportChannelSettingsScreen s={view} mutate={mutate} onClose={() => setOverlay(null)} />}
