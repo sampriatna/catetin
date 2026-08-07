@@ -50,7 +50,7 @@ import {
   sumInOut, formatPeriodLabel, localISO,
 } from "../../../lib/laporanKeuangan";
 import { computeNfProfit } from "../../../lib/nfProfitReport";
-import { submitDailyReport, resubmitDailyReport, settleDailyReport, verifyDailyReportAdmin, requestDailyReportRevision, deleteDailyReport, collectAllDailyReportTxIds, pendingReports, reportsAwaitingVerify, reportsReadyToSettle, reportsAwaitingRevision, reportsForDate, findPendingRevisionReport, reportAwaitingKasirRevision, reportCashAmount, reportSettleUrgency, reportSettleDeadlineLabel, reconcileDailyReports, allDailyReportsForAdmin, applyDailyReportMutation, makeDailyReportSubmissionId, logDailyReportStage, LACI_BY_OUTLET, LACI_FLOOR } from "../../../lib/kasirHarian";
+import { submitDailyReport, resubmitDailyReport, settleDailyReport, verifyDailyReportAdmin, requestDailyReportRevision, deleteDailyReport, collectAllDailyReportTxIds, pendingReports, reportsAwaitingVerify, reportsReadyToSettle, reportsAwaitingRevision, reportsForDate, findPendingRevisionReport, reportAwaitingKasirRevision, reportCashAmount, reportSettleUrgency, reportSettleDeadlineLabel, reconcileDailyReports, allDailyReportsForAdmin, applyDailyReportMutation, makeDailyReportSubmissionId, logDailyReportStage, LACI_BY_OUTLET, LACI_FLOOR, countSmtSubmissionArtifacts } from "../../../lib/kasirHarian";
 import { submitVoidLog, pendingVoidLogs, reviewVoidLog, visibleVoidLogs, VOID_TYPES } from "../../../lib/voidLog";
 import {
   submitSdmReport, buildSdmSnapshot, getOutletConfig, todaySdmReport,
@@ -4040,6 +4040,13 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
     setErr("");
     setSubmitting(true);
 
+    const isSmt = user?.outlet === "SMT";
+    const clientActionId = isSmt
+      ? `smt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`
+      : null;
+    let smtSubmitCalls = 0;
+    let smtApplyCalls = 0;
+
     if (!submissionIdRef.current) {
       submissionIdRef.current = readStoredSubmissionId() || makeDailyReportSubmissionId({
         businessId: resolvedBizId,
@@ -4050,6 +4057,21 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
       writeStoredSubmissionId(submissionIdRef.current);
     }
     const submissionId = submissionIdRef.current;
+
+    if (isSmt) {
+      logDailyReportStage("CLIENT_SUBMIT_CLICK", {
+        clientActionId,
+        submissionId,
+        outletCode: "SMT",
+        reportDate: date,
+      });
+      logDailyReportStage("CLIENT_SUBMIT_HANDLER_STARTED", {
+        clientActionId,
+        submissionId,
+        outletCode: "SMT",
+        reportDate: date,
+      });
+    }
 
     let saved = null;
     let resubmit = false;
@@ -4073,14 +4095,26 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
         outletId: user?.outlet,
         reportDate: date,
         isRevision: !!(isRevision && existingReport),
+        ...(clientActionId ? { clientActionId } : {}),
       });
+      if (isSmt) {
+        logDailyReportStage("CLIENT_API_REQUEST_SENT", {
+          clientActionId,
+          submissionId,
+          outletCode: "SMT",
+          reportDate: date,
+          note: "no dedicated HTTP report API — domain mutate + saveAppState",
+        });
+      }
       if (isRevision && existingReport) {
+        smtSubmitCalls += 1;
         const { report, txs, removeIds } = resubmitDailyReport({ ...s, currentUser: user }, existingReport.id, payload);
         const fulfilledAt = report.resubmittedAt || new Date().toISOString();
         saved = { ...report, opsNote: opsNote.trim(), dailyTargetAtSubmit: dailyTarget || null };
         resubmit = true;
         const reAddIds = new Set((txs || []).map((t) => t.id));
         mutate(d => {
+          smtApplyCalls += 1;
           applyDailyReportMutation(d, { report: saved, txs, removeIds });
           (removeIds || []).forEach((id) => {
             if (!reAddIds.has(id)) applyTransactionDelete(d, id);
@@ -4096,11 +4130,13 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
           } catch { /* ignore */ }
         });
       } else {
+        smtSubmitCalls += 1;
         const { report, txs, idempotent, removeIds = [] } = submitDailyReport({ ...s, currentUser: user }, payload);
         saved = { ...report, opsNote: opsNote.trim(), dailyTargetAtSubmit: dailyTarget || null };
         const applyTxs = idempotent ? [] : txs;
         const reAddIds = new Set((applyTxs || []).map((t) => t.id));
         mutate(d => {
+          smtApplyCalls += 1;
           applyDailyReportMutation(d, { report: saved, txs: applyTxs, removeIds });
           (removeIds || []).forEach((id) => {
             if (!reAddIds.has(id)) applyTransactionDelete(d, id);
@@ -4114,6 +4150,30 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
         });
       }
 
+      if (isSmt) {
+        const arts = countSmtSubmissionArtifacts(sRef?.current || s, date);
+        const classification =
+          arts.reportCount >= 2 && arts.cashCount >= 2 ? "A"
+            : arts.reportCount === 1 && arts.cashCount >= 2 ? "B"
+              : arts.reportCount === 1 && arts.cashCount === 1 ? "ok"
+                : "D";
+        logDailyReportStage("SMT_AFTER_MUTATE", {
+          clientActionId,
+          submissionId,
+          outletCode: "SMT",
+          reportDate: date,
+          submitDailyReportCalls: smtSubmitCalls,
+          applyMutationCalls: smtApplyCalls,
+          reportCount: arts.reportCount,
+          cashCount: arts.cashCount,
+          cashIds: arts.cashIds,
+          classification,
+        });
+        if (arts.cashCount > 1) {
+          console.error("[SMT_TRACE][ALERT] generated cash still >1 after SMT enforce", arts);
+        }
+      }
+
       // Jangan anggap berhasil sebelum critical save ke awan selesai (atau skip jika tidak ada).
       if (typeof onCriticalSave === "function") {
         showActionToast("Sedang mengirim…", "info", 2500);
@@ -4124,6 +4184,7 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
         reportId: saved?.id,
         outletId: user?.outlet,
         reportDate: date,
+        ...(clientActionId ? { clientActionId } : {}),
       });
       clearStoredSubmissionId();
       finishSubmitSuccess(saved, { resubmit });
@@ -4135,6 +4196,7 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
         outletId: user?.outlet,
         reportDate: date,
         error: errText,
+        ...(clientActionId ? { clientActionId } : {}),
       });
 
       // Timeout setelah mutate lokal: laporan mungkin sudah ada — cek dulu sebelum minta kirim baru
