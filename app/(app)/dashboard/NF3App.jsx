@@ -3955,16 +3955,21 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
     setTimeout(() => successBannerRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" }), 80);
   };
 
-  const doDeleteOwn = () => {
+  const doDeleteOwn = async () => {
     if (!existingReport || submitting || submittingRef.current) return;
     const label = shortDate(existingReport.date);
     if (!confirm(`Hapus laporan omset ${label}?\n\nSaldo laci disesuaikan. Anda bisa isi laporan baru dari awal.`)) return;
     setErr("");
     setSubmitting(true);
+    submittingRef.current = true;
     try {
       const { report: deleted, removeIds } = deleteDailyReport(s, existingReport.id, user);
       mutate(d => {
         d.dailyReports = (d.dailyReports || []).filter(r => r.id !== deleted.id);
+        // Bersihkan seluruh duplikat slot outlet+tanggal (bukan hanya id yang dihapus)
+        d.dailyReports = (d.dailyReports || []).filter(r =>
+          !(r.outlet === deleted.outlet && r.date === deleted.date)
+        );
         removeIds.forEach(id => applyTransactionDelete(d, id));
         recordDailyReportDelete(d, deleted);
         d.staffMessages = cancelRevisionMessagesForReport(
@@ -3972,8 +3977,9 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
         );
       });
       submitSuccessRef.current = false;
-      submittingRef.current = false;
+      allowRetryRef.current = false;
       submissionIdRef.current = null;
+      clearStoredSubmissionId();
       setSubmitSuccess(false);
       setSubmitted(false);
       setLastReport(null);
@@ -3981,12 +3987,22 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
       setPhysicalCashEnd("");
       setOpsNote("");
       draftDirtyRef.current = false;
-      try { onCriticalSave?.(); } catch { /* ignore */ }
+      if (typeof onCriticalSave === "function") {
+        await onCriticalSave();
+      }
+      logDailyReportStage("ui_delete_own_persisted", {
+        action: "delete",
+        result: "ok",
+        reportId: deleted.id,
+        outletCode: deleted.outlet,
+        reportDate: deleted.date,
+      });
       showActionToast(`Laporan ${label} dihapus — silakan isi ulang.`, "success");
     } catch (e) {
       setErr(e.message || "Gagal hapus laporan");
       showActionToast(e.message || "Gagal hapus laporan", "error");
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -4723,9 +4739,9 @@ function SettleLaporanScreen({ s, mutate, onClose, onCriticalSave = null, onRelo
       mutate(d => {
         // Hapus dari sumber data (bukan hanya status UI)
         d.dailyReports = (d.dailyReports || []).filter(r => r.id !== deleted.id);
-        // Juga buang duplikat slot yang sama (jaga-jaga)
+        // Buang semua laporan di slot yang sama (submitted/revisi/duplikat)
         d.dailyReports = (d.dailyReports || []).filter(r =>
-          !(r.outlet === deleted.outlet && r.date === deleted.date && r.id !== deleted.id && r.status === "revision_requested")
+          !(r.outlet === deleted.outlet && r.date === deleted.date)
         );
         removeIds.forEach(id => applyTransactionDelete(d, id));
         recordDailyReportDelete(d, deleted);
