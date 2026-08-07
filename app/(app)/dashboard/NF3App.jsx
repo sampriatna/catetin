@@ -3035,7 +3035,7 @@ function CatatTransaksi({ s, bizId, mutate, onSave, onNotify, onClose, business,
   };
 
   if (draft) return (
-    <Sheet title="Tinjau & Simpan" onClose={() => setDraft(null)}>
+    <Sheet title="Tinjau & Simpan" onClose={() => { if (!busy) setDraft(null); }}>
       <div style={{ padding: "20px 16px" }}>
         <Card style={{ padding: 20, textAlign: "center" }}>
           {draft.type === "transfer" ? (
@@ -3061,12 +3061,21 @@ function CatatTransaksi({ s, bizId, mutate, onSave, onNotify, onClose, business,
           )}
         </Card>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 16 }}>
-          <button onClick={() => setDraft(null)} style={{ padding: 14, borderRadius: 14, border: "1px solid var(--line)", background: "var(--surface)", fontWeight: 600, color: "var(--ink)", cursor: "pointer" }}>← Edit lagi</button>
-          <button onClick={async () => {
-            const ok = await onSave(draft);
-            if (ok) onClose();
-            else setErr(isKasir ? "Hanya pengeluaran laci. Omset lewat Laporan Omset." : "Transaksi tidak diizinkan untuk role Anda.");
-          }} style={{ padding: 14, borderRadius: 14, border: "none", background: "var(--brand)", fontWeight: 700, color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><Check size={18} />Simpan</button>
+          <button type="button" disabled={busy} onClick={() => setDraft(null)} style={{ padding: 14, borderRadius: 14, border: "1px solid var(--line)", background: "var(--surface)", fontWeight: 600, color: "var(--ink)", cursor: busy ? "default" : "pointer", opacity: busy ? 0.65 : 1 }}>← Edit lagi</button>
+          <button type="button" disabled={busy} onClick={async () => {
+            if (busy) return;
+            setBusy(true);
+            setErr("");
+            try {
+              const ok = await onSave(draft);
+              if (ok) onClose();
+              else setErr(isKasir ? "Hanya pengeluaran laci. Omset lewat Laporan Omset." : "Transaksi tidak diizinkan untuk role Anda.");
+            } finally {
+              setBusy(false);
+            }
+          }} style={{ padding: 14, borderRadius: 14, border: "none", background: "var(--brand)", fontWeight: 700, color: "#fff", cursor: busy ? "default" : "pointer", opacity: busy ? 0.75 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            {busy ? <><Loader2 size={18} className="animate-spin" />Menyimpan…</> : <><Check size={18} />Simpan</>}
+          </button>
         </div>
         {err && <div style={{ marginTop: 12, padding: 12, borderRadius: 10, background: "var(--out-soft)", color: "var(--out-text)", fontSize: 13 }}>{err}</div>}
       </div>
@@ -7092,6 +7101,7 @@ export default function NF3App(props) {
   const sRef = useRef(null);
   const overlayRef = useRef(null);
   const catatRef = useRef(false);
+  const addTxBusyRef = useRef(false);
   const revisionNotifiedRef = useRef(new Set());
   const openLaporanRef = useRef(null);
   const notifActionRef = useRef(null);
@@ -7179,9 +7189,9 @@ export default function NF3App(props) {
           ? "Indikasi jaringan lambat/putus."
           : "";
         showActionToast(
-          `Gagal simpan ke awan (${getActiveAccountLabel()}) — data masih di HP. ${networkHint} Tap ☁️ untuk retry.`,
+          `Gagal simpan ke awan (${getActiveAccountLabel()}) — data masih di HP (jangan input ulang). ${networkHint} Tap ☁️ untuk retry.`,
           "error",
-          6500
+          7000
         );
       });
   }, [bizId, getActiveAccountLabel]);
@@ -7712,6 +7722,10 @@ export default function NF3App(props) {
   }, [bizId, s?._nfTxRemapped, scheduleImmediateSave]);
 
   const addTx = async (d) => {
+    if (addTxBusyRef.current) {
+      showActionToast("Masih menyimpan… jangan tap lagi.", "info", 2200);
+      return false;
+    }
     const role = user.role || "kasir";
     const amount = Math.round(Number(d?.amount) || 0);
     if (!(amount > 0)) {
@@ -7751,128 +7765,148 @@ export default function NF3App(props) {
       return false;
     }
 
-    // Rekening Sam terhubung → tulis ke FNB (sumber kebenaran), bukan app_state Fishing lokal.
-    if (d.type !== "transfer" && isSharedWallet({ id: d.walletId })) {
-      if (!canWriteSharedBank(role)) {
-        showActionToast("Anda tidak boleh mencatat di rekening bersama.", "error");
-        return false;
-      }
-      try {
-        const txId = "tsh_" + Date.now() + Math.random().toString(36).slice(2, 6);
-        const res = await postSharedBankTx({
-          businessId: bizId,
-          businessName: businessDisplayName || business?.name,
-          sharedWalletId: d.walletId,
-          type: d.type,
-          amount,
-          categoryId: d.categoryId,
-          desc: d.desc,
-          date: d.date,
-          source: d.source || "NF shared bank",
-          txId,
-        });
-        setSharedMirror((prev) => ({
-          ...(prev || {}),
-          [d.walletId]: {
-            ...(prev?.[d.walletId] || {}),
-            linkId: String(d.walletId).replace(/^shared_/, ""),
-            balance: res.balance,
-            sourceWalletName: res.sourceWalletName || "",
-            sourceBusinessName: "Nusa Food",
-            missing: false,
-          },
-        }));
-        setSharedTxByWallet((prev) => {
-          const next = { ...(prev || {}) };
-          const rows = [...(next[d.walletId] || [])];
-          rows.unshift({
-            id: txId,
+    addTxBusyRef.current = true;
+    try {
+      // Rekening Sam terhubung → tulis ke FNB (sumber kebenaran), bukan app_state Fishing lokal.
+      if (d.type !== "transfer" && isSharedWallet({ id: d.walletId })) {
+        if (!canWriteSharedBank(role)) {
+          showActionToast("Anda tidak boleh mencatat di rekening bersama.", "error");
+          return false;
+        }
+        try {
+          const txId = "tsh_" + Date.now() + Math.random().toString(36).slice(2, 6);
+          const res = await postSharedBankTx({
+            businessId: bizId,
+            businessName: businessDisplayName || business?.name,
+            sharedWalletId: d.walletId,
             type: d.type,
             amount,
-            walletId: d.walletId,
             categoryId: d.categoryId,
             desc: d.desc,
-            date: d.date || today(),
+            date: d.date,
             source: d.source || "NF shared bank",
-            meta: {
-              sharedWriteThrough: true,
-              fromBusinessId: bizId,
-              createdById: user?.id || null,
-              createdByName: user?.name || null,
-              createdByRole: role,
-            },
+            txId,
           });
-          next[d.walletId] = rows.slice(0, 100);
-          return next;
-        });
-        mutate((st) => {
-          const w = (st.wallets || []).find((x) => x.id === d.walletId);
-          if (w) w.opening = res.balance;
-        });
-        if (role === "purchasing") {
-          showActionToast(`Belanja tersimpan di ${res.sourceWalletName || "dompet bersama"} · ketuk dompet untuk lihat riwayat`, "success");
-        } else {
-          showActionToast(
-            `Tersimpan di ${res.sourceWalletName || "rekening Sam"} (FNB) · saldo ${fmtMoney(res.balance, view?.profile?.currency || "IDR")}`,
-            "success"
-          );
-        }
-        refreshSharedBankData();
-        return true;
-      } catch (e) {
-        showActionToast(e.message || "Gagal catat ke rekening bersama.", "error");
-        return false;
-      }
-    }
-
-    if (d.type === "out") {
-      const floorErr = role === "purchasing"
-        ? checkPurchasingFloor(d.walletId, d.amount, view?.wallets || [], view?.transactions || [], user)
-        : checkFloor(d.walletId, d.amount, view?.wallets || [], view?.transactions || [], user);
-      if (floorErr) {
-        showActionToast(floorErr, "error");
-        return false;
-      }
-    }
-    const txId = "t" + Date.now() + Math.random().toString(36).slice(2, 5);
-    const transferRef = d.type === "transfer" ? (d.transferRef || ("trf_" + Date.now() + Math.random().toString(36).slice(2, 6))) : null;
-    mutate((st) => {
-      const baseMeta = d.meta && typeof d.meta === "object" ? d.meta : {};
-      const txMeta = {
-        ...baseMeta,
-        createdById: user?.id || baseMeta.createdById || null,
-        createdByName: user?.name || baseMeta.createdByName || null,
-        ...(d.type === "transfer" ? { transferRef } : {}),
-      };
-      if (d.module === "purchasing" || String(d.source || "").startsWith("purchasing")) {
-        txMeta.verified = txMeta.verified === true;
-      }
-      const tx = { ...d, amount, id: txId, meta: txMeta };
-      st.transactions.push(tx);
-      if (d.type === "transfer") {
-        const toW = (st.wallets || []).find((w) => w.id === d.toWalletId);
-        const fromW = (st.wallets || []).find((w) => w.id === d.fromWalletId);
-        if (isKasKecilWallet(toW)) {
-          try {
-            st.staffMessages = prependStaffMessage(
-              st.staffMessages,
-              createPurchasingFundMessage({
-                amount,
-                fromWalletName: fromW?.name || "Kas Besar",
-                author: user,
-                transactionId: txId,
-              }),
-              st.notificationPrefs
+          setSharedMirror((prev) => ({
+            ...(prev || {}),
+            [d.walletId]: {
+              ...(prev?.[d.walletId] || {}),
+              linkId: String(d.walletId).replace(/^shared_/, ""),
+              balance: res.balance,
+              sourceWalletName: res.sourceWalletName || "",
+              sourceBusinessName: "Nusa Food",
+              missing: false,
+            },
+          }));
+          setSharedTxByWallet((prev) => {
+            const next = { ...(prev || {}) };
+            const rows = [...(next[d.walletId] || [])];
+            rows.unshift({
+              id: txId,
+              type: d.type,
+              amount,
+              walletId: d.walletId,
+              categoryId: d.categoryId,
+              desc: d.desc,
+              date: d.date || today(),
+              source: d.source || "NF shared bank",
+              meta: {
+                sharedWriteThrough: true,
+                fromBusinessId: bizId,
+                createdById: user?.id || null,
+                createdByName: user?.name || null,
+                createdByRole: role,
+              },
+            });
+            next[d.walletId] = rows.slice(0, 100);
+            return next;
+          });
+          mutate((st) => {
+            const w = (st.wallets || []).find((x) => x.id === d.walletId);
+            if (w) w.opening = res.balance;
+          });
+          if (role === "purchasing") {
+            showActionToast(`Belanja tersimpan di ${res.sourceWalletName || "dompet bersama"} · ketuk dompet untuk lihat riwayat`, "success");
+          } else {
+            showActionToast(
+              `Tersimpan di ${res.sourceWalletName || "rekening Sam"} (FNB) · saldo ${fmtMoney(res.balance, view?.profile?.currency || "IDR")}`,
+              "success"
             );
-          } catch (e) {
-            console.error("[addTx] purchasing fund message error:", e);
+          }
+          refreshSharedBankData();
+          return true;
+        } catch (e) {
+          showActionToast(e.message || "Gagal catat ke rekening bersama.", "error");
+          return false;
+        }
+      }
+
+      if (d.type === "out") {
+        const floorErr = role === "purchasing"
+          ? checkPurchasingFloor(d.walletId, d.amount, view?.wallets || [], view?.transactions || [], user)
+          : checkFloor(d.walletId, d.amount, view?.wallets || [], view?.transactions || [], user);
+        if (floorErr) {
+          showActionToast(floorErr, "error");
+          return false;
+        }
+      }
+      const txId = "t" + Date.now() + Math.random().toString(36).slice(2, 5);
+      const transferRef = d.type === "transfer" ? (d.transferRef || ("trf_" + Date.now() + Math.random().toString(36).slice(2, 6))) : null;
+      mutate((st) => {
+        const baseMeta = d.meta && typeof d.meta === "object" ? d.meta : {};
+        const txMeta = {
+          ...baseMeta,
+          createdById: user?.id || baseMeta.createdById || null,
+          createdByName: user?.name || baseMeta.createdByName || null,
+          ...(d.type === "transfer" ? { transferRef } : {}),
+        };
+        if (d.module === "purchasing" || String(d.source || "").startsWith("purchasing")) {
+          txMeta.verified = txMeta.verified === true;
+        }
+        const tx = { ...d, amount, id: txId, meta: txMeta };
+        st.transactions.push(tx);
+        if (d.type === "transfer") {
+          const toW = (st.wallets || []).find((w) => w.id === d.toWalletId);
+          const fromW = (st.wallets || []).find((w) => w.id === d.fromWalletId);
+          if (isKasKecilWallet(toW)) {
+            try {
+              st.staffMessages = prependStaffMessage(
+                st.staffMessages,
+                createPurchasingFundMessage({
+                  amount,
+                  fromWalletName: fromW?.name || "Kas Besar",
+                  author: user,
+                  transactionId: txId,
+                }),
+                st.notificationPrefs
+              );
+            } catch (e) {
+              console.error("[addTx] purchasing fund message error:", e);
+            }
           }
         }
+      });
+      // Tunggu sync awan agar toast sukses tidak mendorong input ulang saat jaringan putus.
+      try {
+        showActionToast("Menyimpan ke awan…", "info", 2500);
+        await scheduleImmediateSave({ critical: true });
+        showActionToast("Transaksi tersimpan", "success");
+      } catch (e) {
+        const errText = String(e?.message || e || "");
+        const networkHint = /timeout|network|failed to fetch|offline/i.test(errText)
+          ? " Jaringan lambat/putus."
+          : "";
+        showActionToast(
+          `Sudah tercatat di HP — gagal ke awan.${networkHint} Jangan input ulang. Tap ☁️ untuk retry.`,
+          "error",
+          7000
+        );
       }
-    });
-    scheduleImmediateSave({ critical: true });
-    showActionToast("Transaksi tersimpan — menyinkron ke awan…", "success");
-    return true;
+      // Tetap true: data lokal sudah aman; form ditutup supaya tidak tap Simpan lagi.
+      return true;
+    } finally {
+      addTxBusyRef.current = false;
+    }
   };
   const acceptDraft = (n) => {
     if (!canDo(user.role, "inputIncome")) return;

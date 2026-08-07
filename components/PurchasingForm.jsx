@@ -623,7 +623,7 @@ function StepReview({ s, draft, onSave, onBack, onClose, onNew }) {
           subtotal:  (Number(i.qty) || 0) * (Number(i.unitPrice) || 0),
         }));
 
-      const ok = addPurchasingExpense(onSave, {
+      const ok = await addPurchasingExpense(onSave, {
         amount:     displayAmount,
         walletId:   draft.walletId,
         categoryId: draft.categoryId,
