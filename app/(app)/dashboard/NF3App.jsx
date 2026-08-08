@@ -50,7 +50,7 @@ import {
   sumInOut, formatPeriodLabel, localISO, todayLocal,
 } from "../../../lib/laporanKeuangan";
 import { computeNfProfit } from "../../../lib/nfProfitReport";
-import { submitDailyReport, resubmitDailyReport, settleDailyReport, verifyDailyReportAdmin, requestDailyReportRevision, deleteDailyReport, collectAllDailyReportTxIds, pendingReports, reportsAwaitingVerify, reportsReadyToSettle, reportsAwaitingRevision, reportsForDate, findPendingRevisionReport, reportAwaitingKasirRevision, reportCashAmount, reportSettleUrgency, reportSettleDeadlineLabel, reconcileDailyReports, allDailyReportsForAdmin, applyDailyReportMutation, makeDailyReportSubmissionId, logDailyReportStage, LACI_BY_OUTLET, LACI_FLOOR, countSmtSubmissionArtifacts, hasOrphanLaporanCashSlot, findCommittedDailyReport, recoverDailyReportFromOrphanCash } from "../../../lib/kasirHarian";
+import { submitDailyReport, resubmitDailyReport, settleDailyReport, verifyDailyReportAdmin, requestDailyReportRevision, deleteDailyReport, collectAllDailyReportTxIds, pendingReports, reportsAwaitingVerify, reportsReadyToSettle, reportsAwaitingRevision, reportsForDate, findPendingRevisionReport, reportAwaitingKasirRevision, reportCashAmount, reportSettleUrgency, reportSettleDeadlineLabel, reconcileDailyReports, allDailyReportsForAdmin, applyDailyReportMutation, makeDailyReportSubmissionId, makeSmtOmzetIdempotencyKey, logDailyReportStage, LACI_BY_OUTLET, LACI_FLOOR, countSmtSubmissionArtifacts, hasOrphanLaporanCashSlot, findCommittedDailyReport, recoverDailyReportFromOrphanCash, isUncertainDeliveryError, userFacingDailyReportError } from "../../../lib/kasirHarian";
 import { submitVoidLog, pendingVoidLogs, reviewVoidLog, visibleVoidLogs, VOID_TYPES } from "../../../lib/voidLog";
 import {
   submitSdmReport, buildSdmSnapshot, getOutletConfig, todaySdmReport,
@@ -3871,7 +3871,7 @@ function SdmHarianScreen({ s, mutate, onClose, onCriticalSave = null }) {
 }
 
 // ─── Laporan Omset Harian (kasir) ──────────────────────────
-function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalSave = null, onVerifyCommitted = null, businessId = null }) {
+function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalSave = null, onVerifyCommitted = null, businessId = null, getLatestState = null }) {
   const user = s.currentUser;
   const cur = s.profile.currency;
   const cfg = getOutletConfig(s.outletConfig, user.outlet);
@@ -4090,21 +4090,68 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
   };
 
   const resolvedBizId = businessId || s?.businessId || s?.profile?.businessId || null;
+  const isSmtOutlet = user?.outlet === "SMT";
   const submissionStorageKey = user?.outlet && date
-    ? `nf3_dr_sub|${resolvedBizId || "biz"}|${user.outlet}|${date}`
+    ? `nf3_dr_sub|${resolvedBizId || "biz"}|${user.outlet}|${date}${isSmtOutlet ? "|omzet" : ""}`
     : null;
 
+  const readSubmissionStorage = (store) => {
+    if (!submissionStorageKey || typeof store === "undefined" || !store) return null;
+    try { return store.getItem(submissionStorageKey); } catch { return null; }
+  };
+  const writeSubmissionStorage = (store, id) => {
+    if (!submissionStorageKey || !id || typeof store === "undefined" || !store) return;
+    try { store.setItem(submissionStorageKey, id); } catch { /* ignore */ }
+  };
+  const clearSubmissionStorage = (store) => {
+    if (!submissionStorageKey || typeof store === "undefined" || !store) return;
+    try { store.removeItem(submissionStorageKey); } catch { /* ignore */ }
+  };
+
   const readStoredSubmissionId = () => {
-    if (!submissionStorageKey || typeof sessionStorage === "undefined") return null;
-    try { return sessionStorage.getItem(submissionStorageKey); } catch { return null; }
+    // SMT: localStorage dulu agar refresh/draft reload tetap key yang sama
+    if (isSmtOutlet) {
+      return readSubmissionStorage(typeof localStorage !== "undefined" ? localStorage : null)
+        || readSubmissionStorage(typeof sessionStorage !== "undefined" ? sessionStorage : null);
+    }
+    return readSubmissionStorage(typeof sessionStorage !== "undefined" ? sessionStorage : null);
   };
   const writeStoredSubmissionId = (id) => {
-    if (!submissionStorageKey || !id || typeof sessionStorage === "undefined") return;
-    try { sessionStorage.setItem(submissionStorageKey, id); } catch { /* ignore */ }
+    if (isSmtOutlet) {
+      writeSubmissionStorage(typeof localStorage !== "undefined" ? localStorage : null, id);
+      writeSubmissionStorage(typeof sessionStorage !== "undefined" ? sessionStorage : null, id);
+      return;
+    }
+    writeSubmissionStorage(typeof sessionStorage !== "undefined" ? sessionStorage : null, id);
   };
   const clearStoredSubmissionId = () => {
-    if (!submissionStorageKey || typeof sessionStorage === "undefined") return;
-    try { sessionStorage.removeItem(submissionStorageKey); } catch { /* ignore */ }
+    if (isSmtOutlet) {
+      clearSubmissionStorage(typeof localStorage !== "undefined" ? localStorage : null);
+      clearSubmissionStorage(typeof sessionStorage !== "undefined" ? sessionStorage : null);
+      return;
+    }
+    clearSubmissionStorage(typeof sessionStorage !== "undefined" ? sessionStorage : null);
+  };
+
+  const resolveSubmissionId = () => {
+    if (submissionIdRef.current) return submissionIdRef.current;
+    const stored = readStoredSubmissionId();
+    if (stored) {
+      submissionIdRef.current = stored;
+      return stored;
+    }
+    // SMT omzet: key stabil (outlet+tanggal+jenis) — refresh/retry = key sama
+    const next = isSmtOutlet
+      ? makeSmtOmzetIdempotencyKey({ businessId: resolvedBizId, date })
+      : makeDailyReportSubmissionId({
+        businessId: resolvedBizId,
+        outlet: user?.outlet,
+        date,
+        userId: user?.id,
+      });
+    submissionIdRef.current = next;
+    writeStoredSubmissionId(next);
+    return next;
   };
 
   const submit = async () => {
@@ -4113,36 +4160,34 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
     setErr("");
     setSubmitting(true);
 
-    const isSmt = user?.outlet === "SMT";
-    const clientActionId = isSmt
-      ? `smt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`
-      : null;
+    const isSmt = isSmtOutlet;
+    const requestId = `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const clientActionId = isSmt ? `smt_${requestId}` : null;
     let smtSubmitCalls = 0;
     let smtApplyCalls = 0;
 
-    if (!submissionIdRef.current) {
-      submissionIdRef.current = readStoredSubmissionId() || makeDailyReportSubmissionId({
-        businessId: resolvedBizId,
-        outlet: user?.outlet,
-        date,
-        userId: user?.id,
-      });
-      writeStoredSubmissionId(submissionIdRef.current);
-    }
-    const submissionId = submissionIdRef.current;
+    const submissionId = resolveSubmissionId();
+    // Pastikan key tersimpan sebelum request (retry/refresh memakai key yang sama)
+    writeStoredSubmissionId(submissionId);
 
     if (isSmt) {
       logDailyReportStage("CLIENT_SUBMIT_CLICK", {
+        requestId,
         clientActionId,
         submissionId,
+        idempotencyKey: submissionId,
         outletCode: "SMT",
         reportDate: date,
+        reportType: "omzet",
       });
       logDailyReportStage("CLIENT_SUBMIT_HANDLER_STARTED", {
+        requestId,
         clientActionId,
         submissionId,
+        idempotencyKey: submissionId,
         outletCode: "SMT",
         reportDate: date,
+        reportType: "omzet",
       });
     }
 
@@ -4150,10 +4195,13 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
     let resubmit = false;
     try {
       logDailyReportStage("STARTED", {
+        requestId,
         submissionId,
+        idempotencyKey: submissionId,
         businessId: resolvedBizId,
         outletCode: user?.outlet,
         reportDate: date,
+        reportType: "omzet",
         clientTimestamp: new Date().toISOString(),
       });
 
@@ -4191,18 +4239,24 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
         idempotencyKey: submissionId,
       };
       logDailyReportStage("ui_submit_click", {
+        requestId,
         submissionId,
+        idempotencyKey: submissionId,
         outletId: user?.outlet,
         reportDate: date,
+        reportType: "omzet",
         isRevision: !!(isRevision && existingReport),
         ...(clientActionId ? { clientActionId } : {}),
       });
       if (isSmt) {
         logDailyReportStage("CLIENT_API_REQUEST_SENT", {
+          requestId,
           clientActionId,
           submissionId,
+          idempotencyKey: submissionId,
           outletCode: "SMT",
           reportDate: date,
+          reportType: "omzet",
           note: "no dedicated HTTP report API — domain mutate + saveAppState",
         });
       }
@@ -4250,48 +4304,73 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
         });
       }
 
-      if (isSmt) {
-        const arts = countSmtSubmissionArtifacts(sRef?.current || s, date);
-        const classification =
-          arts.reportCount >= 2 && arts.cashCount >= 2 ? "A"
-            : arts.reportCount === 1 && arts.cashCount >= 2 ? "B"
-              : arts.reportCount === 1 && arts.cashCount === 1 ? "ok"
-                : "D";
-        logDailyReportStage("SMT_AFTER_MUTATE", {
-          clientActionId,
-          submissionId,
-          outletCode: "SMT",
-          reportDate: date,
-          submitDailyReportCalls: smtSubmitCalls,
-          applyMutationCalls: smtApplyCalls,
-          reportCount: arts.reportCount,
-          cashCount: arts.cashCount,
-          cashIds: arts.cashIds,
-          classification,
-        });
-        if (arts.cashCount > 1) {
-          console.error("[SMT_TRACE][ALERT] generated cash still >1 after SMT enforce", arts);
-        }
-      }
-
-      // Jangan anggap berhasil sebelum critical save ke awan selesai.
+      // CRITICAL SAVE DULU — diagnostik SMT tidak boleh menghalangi persist ke pusat.
+      // (Bug historis: ReferenceError sRef setelah mutate → save tidak jalan → sync race.)
       if (typeof onCriticalSave === "function") {
         showActionToast("Sedang mengirim…", "info", 2500);
         logDailyReportStage("REPORT_SAVING", {
+          requestId,
           submissionId,
+          idempotencyKey: submissionId,
           reportId: saved?.id,
           outletCode: user?.outlet,
           reportDate: date,
+          reportType: "omzet",
         });
         await onCriticalSave();
       }
       logDailyReportStage("REPORT_SAVED", {
+        requestId,
         submissionId,
+        idempotencyKey: submissionId,
         reportId: saved?.id,
         outletCode: user?.outlet,
         reportDate: date,
+        reportType: "omzet",
+        result: "saved",
+        source: "submit",
         ...(clientActionId ? { clientActionId } : {}),
       });
+
+      // Diagnostik SMT setelah save — gagal log tidak boleh mengubah status kirim
+      if (isSmt) {
+        try {
+          const latest = (typeof getLatestState === "function" ? getLatestState() : null) || s;
+          const arts = countSmtSubmissionArtifacts(latest, date);
+          const classification =
+            arts.reportCount >= 2 && arts.cashCount >= 2 ? "A"
+              : arts.reportCount === 1 && arts.cashCount >= 2 ? "B"
+                : arts.reportCount === 1 && arts.cashCount === 1 ? "ok"
+                  : "D";
+          logDailyReportStage("SMT_AFTER_SAVE", {
+            requestId,
+            clientActionId,
+            submissionId,
+            idempotencyKey: submissionId,
+            outletCode: "SMT",
+            reportDate: date,
+            reportType: "omzet",
+            result: classification === "ok" ? "create_or_upsert" : "anomaly",
+            reportId: saved?.id || null,
+            submitDailyReportCalls: smtSubmitCalls,
+            applyMutationCalls: smtApplyCalls,
+            reportCount: arts.reportCount,
+            cashCount: arts.cashCount,
+            cashIds: arts.cashIds,
+            classification,
+          });
+        } catch (diagErr) {
+          logDailyReportStage("SMT_DIAG_FAILED", {
+            requestId,
+            submissionId,
+            idempotencyKey: submissionId,
+            outletCode: "SMT",
+            reportDate: date,
+            result: "failed",
+            error: diagErr?.message || String(diagErr),
+          });
+        }
+      }
 
       // Read-back verification: laporan harus terbaca dari source of truth
       if (typeof onVerifyCommitted === "function") {
@@ -4300,6 +4379,7 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
           reportId: saved?.id,
           reportKey: saved?.reportKey,
           submissionId,
+          idempotencyKey: submissionId,
           outlet: user?.outlet,
           date,
         });
@@ -4311,73 +4391,149 @@ function KasirHarianScreen({ s, mutate, onClose, initialDate = null, onCriticalS
         saved = {
           ...saved,
           ...verified,
+          serverRecordId: verified.id || saved.id,
+          syncStatus: "synced",
           commitStatus: "committed",
           committedAt: new Date().toISOString(),
         };
       } else {
-        saved = { ...saved, commitStatus: "committed", committedAt: new Date().toISOString() };
+        saved = {
+          ...saved,
+          serverRecordId: saved.id,
+          syncStatus: "synced",
+          commitStatus: "committed",
+          committedAt: new Date().toISOString(),
+        };
       }
 
       mutate((d) => {
         applyDailyReportMutation(d, {
-          report: { ...saved, commitStatus: "committed", committedAt: saved.committedAt },
+          report: {
+            ...saved,
+            serverRecordId: saved.serverRecordId || saved.id,
+            syncStatus: "synced",
+            commitStatus: "committed",
+            committedAt: saved.committedAt,
+          },
           txs: [],
         });
       });
 
       logDailyReportStage("COMMITTED", {
+        requestId,
         submissionId,
+        idempotencyKey: submissionId,
         reportId: saved?.id,
+        serverRecordId: saved?.serverRecordId || saved?.id,
         outletCode: user?.outlet,
         reportDate: date,
+        reportType: "omzet",
         serverTimestamp: saved?.committedAt,
+        result: "committed",
         status: "committed",
+        syncStatus: "synced",
+        source: "submit",
       });
-      clearStoredSubmissionId();
+      // SMT: pertahankan key stabil di storage agar refresh/sync tidak membuat key baru
+      if (!isSmt) clearStoredSubmissionId();
       finishSubmitSuccess(saved, { resubmit });
     } catch (e) {
-      const errText = e.message || String(e);
-      const maybeTimeout = /timeout|network|failed to fetch|offline|gagal menyimpan|simpan|belum terbaca/i.test(errText);
+      const errText = e?.message || String(e);
+      const uncertain = isUncertainDeliveryError(e);
       logDailyReportStage("FAILED", {
+        requestId,
         submissionId,
+        idempotencyKey: submissionId,
         outletCode: user?.outlet,
         reportDate: date,
+        reportType: "omzet",
         reportId: saved?.id || null,
+        result: "failed",
         error: errText,
+        // Error UI ≠ reset identitas — key tetap untuk sync/retry
+        syncStatus: "pending",
         ...(clientActionId ? { clientActionId } : {}),
       });
 
+      // Jangan hapus laporan lokal / identitas — hanya tandai pending sync
       if (saved?.id) {
         mutate((d) => {
           applyDailyReportMutation(d, {
-            report: { ...saved, commitStatus: "failed" },
+            report: {
+              ...saved,
+              commitStatus: "failed",
+              syncStatus: "pending",
+              idempotencyKey: saved.idempotencyKey || submissionId,
+              submissionId: saved.submissionId || submissionId,
+            },
             txs: [],
           });
         });
       }
 
-      // Timeout setelah mutate lokal: coba read-back dulu — jangan false success tanpa ack
-      if (maybeTimeout && saved?.id && typeof onVerifyCommitted === "function") {
-        showActionToast("Koneksi terputus, sedang memeriksa status di awan…", "info", 3500);
+      // Status tidak pasti / setelah mutate lokal: cek dulu by outlet+tanggal+idempotencyKey
+      const shouldVerify = (uncertain || !!saved?.id) && typeof onVerifyCommitted === "function";
+      if (shouldVerify) {
+        const checkMsg = userFacingDailyReportError(e, { uncertain: true });
+        setErr(checkMsg);
+        showActionToast(checkMsg, "info", 4000);
         try {
           const verified = await onVerifyCommitted({
             reportId: saved?.id,
             reportKey: saved?.reportKey,
             submissionId,
+            idempotencyKey: submissionId,
             outlet: user?.outlet,
             date,
           });
           if (verified) {
-            clearStoredSubmissionId();
-            finishSubmitSuccess({ ...saved, ...verified, commitStatus: "committed" }, { resubmit });
+            logDailyReportStage("VERIFY_EXISTING_AFTER_UNCERTAIN", {
+              requestId,
+              submissionId,
+              idempotencyKey: submissionId,
+              outletCode: user?.outlet,
+              reportDate: date,
+              reportType: "omzet",
+              reportId: verified.id,
+              result: "existing",
+            });
+            if (!isSmt) clearStoredSubmissionId();
+            finishSubmitSuccess({
+              ...saved,
+              ...verified,
+              serverRecordId: verified.id,
+              syncStatus: "synced",
+              commitStatus: "committed",
+            }, { resubmit });
             return;
           }
-        } catch { /* fall through */ }
+          logDailyReportStage("VERIFY_NOT_FOUND_AFTER_UNCERTAIN", {
+            requestId,
+            submissionId,
+            idempotencyKey: submissionId,
+            outletCode: user?.outlet,
+            reportDate: date,
+            reportType: "omzet",
+            result: "not_found",
+          });
+        } catch (verifyErr) {
+          logDailyReportStage("VERIFY_FAILED", {
+            requestId,
+            submissionId,
+            idempotencyKey: submissionId,
+            outletCode: user?.outlet,
+            reportDate: date,
+            error: verifyErr?.message || String(verifyErr),
+            result: "failed",
+          });
+        }
       }
 
-      const msg = maybeTimeout
-        ? "Koneksi terputus saat menyimpan. Jangan buat laporan baru — ketuk kirim ulang (submissionId sama)."
-        : (errText || "Gagal menyimpan laporan. Silakan kirim ulang.");
+      // Key yang sama untuk retry — jangan regenerate
+      writeStoredSubmissionId(submissionId);
+      const msg = uncertain
+        ? "Status pengiriman belum dapat dipastikan. Laporan belum ditemukan — ketuk kirim ulang (aman) dengan key yang sama."
+        : userFacingDailyReportError(e);
       unlockSubmitForRetry(msg);
       showActionToast(msg, "error");
     } finally {
@@ -7383,8 +7539,9 @@ export default function NF3App(props) {
     [applyMemberUsers, members]
   );
 
-  const flushSave = useCallback(() => {
-    if (!bizId || skipSaveRef.current || !allowSaveRef.current) return Promise.resolve(null);
+  const flushSave = useCallback((opts = {}) => {
+    const force = opts.force === true;
+    if (!bizId || (!force && skipSaveRef.current) || !allowSaveRef.current) return Promise.resolve(null);
     const payload = pendingSavePayloadRef.current;
     if (!payload) return saveQueueRef.current.catch(() => null);
     const payloadKey = JSON.stringify(payload);
@@ -7398,7 +7555,8 @@ export default function NF3App(props) {
     const savePromise = saveQueueRef.current
       .catch(() => {}) // lanjut antrean meski save sebelumnya gagal
       .then(async () => {
-        if (skipSaveRef.current) {
+        // force=true dipakai sync: flush pending sebelum pull, meski skipSave sudah di-arm
+        if (!force && skipSaveRef.current) {
           throw new Error("Simpan ditunda (sedang sync dari awan). Coba lagi sebentar.");
         }
         const updatedAt = await saveState(bizId, payload);
@@ -7464,11 +7622,26 @@ export default function NF3App(props) {
       }
       showActionToast("Menyinkronkan dari awan…", "info", 8000);
     }
-    skipSaveRef.current = true;
     try {
       clearTimeout(saveDebounceRef.current);
-      flushSave();
+      // PENTING: flush pending DULU (force), baru arm skipSave.
+      // Bug historis: skipSave=true sebelum flush → pending lokal tidak pernah terdorong,
+      // lalu pull/merge bisa membuat status “belum terkirim” meski pusat sudah punya record.
+      if (sRef.current) {
+        pendingSavePayloadRef.current = extractSavePayload(sRef.current);
+      }
+      try {
+        await flushSave({ force: true });
+      } catch (flushErr) {
+        logDailyReportStage("SYNC_FLUSH_PENDING_FAILED", {
+          outletCode: sRef.current?.currentUser?.outlet || null,
+          result: "failed",
+          error: flushErr?.message || String(flushErr),
+          source: "sync",
+        });
+      }
       await saveQueueRef.current.catch(() => {});
+      skipSaveRef.current = true;
 
       const cloudDoc = await loadState(bizId, { businessType: business?.type, business });
       const prev = sRef.current;
@@ -7489,8 +7662,17 @@ export default function NF3App(props) {
           wallets: merged.wallets ?? cloudDoc.wallets,
           _cloudUpdatedAt: cloudDoc._cloudUpdatedAt,
         };
+        logDailyReportStage("SYNC_PULL_MERGED", {
+          outletCode: prev?.currentUser?.outlet || null,
+          result: "existing_or_upsert",
+          localReportCount: (prev.dailyReports || []).length,
+          cloudReportCount: (cloudDoc.dailyReports || []).length,
+          mergedReportCount: (nextDoc.dailyReports || []).length,
+          source: "sync",
+        });
       }
       setS(mergeLoadedDoc(nextDoc));
+      sRef.current = { ...(sRef.current || {}), ...nextDoc };
       allowSaveRef.current = true;
       const meta = buildSyncMeta(nextDoc, prev);
       setSyncInfo(meta);
@@ -8334,7 +8516,7 @@ export default function NF3App(props) {
         {overlay === "sosmedHarian" && features.sosmedReports && canInputSosmed(user, s?.sosmedConfig) && <SosmedHarianScreen s={view} mutate={mutate} onClose={() => setOverlay(null)} user={user} onCriticalSave={() => scheduleImmediateSave({ critical: true })} />}
         {overlay === "sosmedConfig" && features.sosmedReports && canDo(user.role, "settleLaci") && <SosmedConfigScreen s={view} mutate={mutate} onClose={() => setOverlay(null)} />}
         {overlay === "sdmHarian" && features.kasirDaily && canDo(user.role, "inputLaporanHarian") && <SdmHarianScreen s={view} mutate={mutate} onClose={() => setOverlay(null)} onCriticalSave={() => scheduleImmediateSave({ critical: true })} />}
-        {overlay === "laporanHarian" && features.kasirDaily && canDo(user.role, "inputLaporanHarian") && <KasirHarianScreen key={`${laporanOpenSeq}-${laporanInitialDate || "today"}`} s={view} mutate={mutate} initialDate={laporanInitialDate} businessId={bizId} onCriticalSave={() => scheduleImmediateSave({ critical: true })} onVerifyCommitted={async (q) => {
+        {overlay === "laporanHarian" && features.kasirDaily && canDo(user.role, "inputLaporanHarian") && <KasirHarianScreen key={`${laporanOpenSeq}-${laporanInitialDate || "today"}`} s={view} mutate={mutate} initialDate={laporanInitialDate} businessId={bizId} getLatestState={() => sRef.current} onCriticalSave={() => scheduleImmediateSave({ critical: true })} onVerifyCommitted={async (q) => {
           const cloudDoc = await loadState(bizId, { businessType: business?.type, business });
           return findCommittedDailyReport(cloudDoc, q);
         }} onClose={() => { setLaporanInitialDate(null); setOverlay(null); }} />}
