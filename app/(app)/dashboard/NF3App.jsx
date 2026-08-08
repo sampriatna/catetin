@@ -50,7 +50,7 @@ import {
   sumInOut, formatPeriodLabel, localISO, todayLocal,
 } from "../../../lib/laporanKeuangan";
 import { computeNfProfit } from "../../../lib/nfProfitReport";
-import { submitDailyReport, resubmitDailyReport, settleDailyReport, verifyDailyReportAdmin, requestDailyReportRevision, deleteDailyReport, collectAllDailyReportTxIds, pendingReports, reportsAwaitingVerify, reportsReadyToSettle, reportsAwaitingRevision, reportsForDate, findPendingRevisionReport, reportAwaitingKasirRevision, reportCashAmount, reportSettleUrgency, reportSettleDeadlineLabel, reconcileDailyReports, allDailyReportsForAdmin, applyDailyReportMutation, makeDailyReportSubmissionId, logDailyReportStage, LACI_BY_OUTLET, LACI_FLOOR, countSmtSubmissionArtifacts, hasOrphanLaporanCashSlot, findCommittedDailyReport, recoverDailyReportFromOrphanCash } from "../../../lib/kasirHarian";
+import { submitDailyReport, resubmitDailyReport, settleDailyReport, verifyDailyReportAdmin, requestDailyReportRevision, deleteDailyReport, collectAllDailyReportTxIds, pendingReports, reportsAwaitingVerify, reportsReadyToSettle, reportsAwaitingRevision, reportsForDate, findPendingRevisionReport, reportAwaitingKasirRevision, reportCashAmount, reportSettleUrgency, reportSettleDeadlineLabel, reconcileDailyReports, allDailyReportsForAdmin, applyDailyReportMutation, makeDailyReportSubmissionId, logDailyReportStage, LACI_BY_OUTLET, LACI_FLOOR, laciSettleCheck, countSmtSubmissionArtifacts, hasOrphanLaporanCashSlot, findCommittedDailyReport, recoverDailyReportFromOrphanCash } from "../../../lib/kasirHarian";
 import { submitVoidLog, pendingVoidLogs, reviewVoidLog, visibleVoidLogs, VOID_TYPES } from "../../../lib/voidLog";
 import {
   submitSdmReport, buildSdmSnapshot, getOutletConfig, todaySdmReport,
@@ -4673,13 +4673,14 @@ function SettleReportCard({ r, s, cur, user, onVerify, onRevision, onSettle, onD
   const dayVoids = (s.voidLogs || []).filter(v => v.outlet === r.outlet && v.date === r.date);
   const pendingVoids = dayVoids.filter(v => v.status === "submitted");
   const walletId = LACI_BY_OUTLET[r.outlet];
-  const laciBal = walletId ? walletBalance(walletId, s.wallets, s.transactions) : 0;
-  const floor = r.laciFloor || LACI_FLOOR;
-  const expectedLaci = floor + cash;
-  const laciDiff = laciBal - expectedLaci;
-  const laciOk = Math.abs(laciDiff) <= 1000;
-  const laciOver = laciDiff > 1000;
-  const laciUnder = laciDiff < -1000;
+  const laciCheck = laciSettleCheck(s, r);
+  const laciBal = laciCheck.balance;
+  const floor = laciCheck.floor || r.laciFloor || LACI_FLOOR;
+  const expectedLaci = laciCheck.expectedBefore;
+  const laciDiff = laciCheck.diff;
+  const laciOk = laciCheck.ok;
+  const laciOver = laciDiff > 0 && !laciOk;
+  const laciUnder = laciDiff < 0 && !laciOk;
   const urgency = reportSettleUrgency(r);
   const statusLabel = {
     submitted: "Menunggu verifikasi",
@@ -4714,18 +4715,48 @@ function SettleReportCard({ r, s, cur, user, onVerify, onRevision, onSettle, onD
           <div>Harusnya (floor + tunai): <b>{fmtMoney(expectedLaci, cur)}</b></div>
           {!laciOk && (
             <div style={{ color: "#92400E", fontWeight: 700, marginTop: 4, lineHeight: 1.45 }}>
-              ⚠ Selisih besar
+              ⚠ Uang selisih — settle ditolak sampai laci kembali modal {fmtMoney(floor, cur)}.
               {laciOver
-                ? " — kemungkinan duplikat omset tunai dari revisi."
+                ? " Kemungkinan omzet tunai dobel / transaksi ekstra."
                 : laciUnder
-                  ? " — transaksi tunai belum masuk laci (atau sudah terhapus)."
-                  : "."}
+                  ? " Modal kurang dari 250rb, atau omset tunai belum masuk / ada pengeluaran."
+                  : ""}
+              {" "}Mohon minta revisi ke kasir (tombol di bawah).
               {onDelete
-                ? " Gunakan tombol merah Hapus laporan di bawah (bukan hapus transaksi satu-satu di Laporan)."
-                : " Minta kasir revisi atau hubungi admin."}
+                ? " Atau hapus laporan lalu kasir isi ulang dari awal."
+                : ""}
+            </div>
+          )}
+          {laciOk && (
+            <div style={{ color: "var(--in-text)", fontWeight: 600, marginTop: 4 }}>
+              ✓ Laci cocok — setelah settle modal stabil {fmtMoney(floor, cur)}.
             </div>
           )}
         </div>
+      )}
+      {!laciOk && (r.status === "submitted" || r.status === "admin_verified") && (
+        <button
+          type="button"
+          disabled={busy === r.id}
+          onClick={() => {
+            setRevisingId(r.id);
+            setRevisionNote(laciCheck.revisionNoteSuggestion || "");
+          }}
+          style={{
+            width: "100%",
+            marginBottom: 10,
+            padding: 11,
+            borderRadius: 12,
+            border: "2px solid var(--out-text)",
+            background: "var(--out-soft)",
+            color: "var(--out-text)",
+            fontWeight: 800,
+            fontSize: 13,
+            cursor: "pointer",
+          }}
+        >
+          Minta revisi ke kasir — uang selisih
+        </button>
       )}
       {!laciOk && onDelete && r.status !== "settled" && (
         <div style={{ marginBottom: 10 }}>
@@ -4796,13 +4827,16 @@ function SettleReportCard({ r, s, cur, user, onVerify, onRevision, onSettle, onD
           {r.status === "admin_verified" && (
             <button disabled={busy === r.id || pendingVoids.length > 0 || !laciOk} onClick={() => onSettle(r.id)}
               style={{ width: "100%", padding: 11, borderRadius: 12, border: "none", background: (pendingVoids.length || !laciOk) ? "var(--ink3)" : "var(--brand)", color: "#fff", fontWeight: 700, fontSize: 13, cursor: (pendingVoids.length || !laciOk) ? "default" : "pointer", opacity: busy === r.id ? .6 : 1 }}>
-              {busy === r.id ? "Memproses…" : pendingVoids.length ? "Review void dulu" : !laciOk ? "Perbaiki selisih laci dulu" : "Settle → Kas Besar & Rekening"}
+              {busy === r.id ? "Memproses…" : pendingVoids.length ? "Review void dulu" : !laciOk ? "Settle ditolak — selisih laci" : "Settle → Kas Besar & Rekening"}
             </button>
           )}
           {(r.status === "submitted" || r.status === "admin_verified") && (
-            <button type="button" disabled={busy === r.id} onClick={() => { setRevisingId(r.id); setRevisionNote(""); }}
+            <button type="button" disabled={busy === r.id} onClick={() => {
+              setRevisingId(r.id);
+              setRevisionNote(!laciOk && laciCheck.revisionNoteSuggestion ? laciCheck.revisionNoteSuggestion : "");
+            }}
               style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--out-text)", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
-              Minta revisi kasir
+              {laciOk ? "Minta revisi kasir" : "Minta revisi kasir (uang selisih)"}
             </button>
           )}
           {r.status !== "revision_requested" && (
