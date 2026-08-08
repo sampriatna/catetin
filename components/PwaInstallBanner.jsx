@@ -84,5 +84,34 @@ export default function PwaInstallBanner() {
 
 export function registerServiceWorker() {
   if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
-  navigator.serviceWorker.register("/sw.js").catch(() => {});
+  navigator.serviceWorker.register(`/sw.js?v=${Date.now().toString(36)}`).catch(() => {});
+  // SW baru → buang cache lama; staf tetap perlu hard-reload untuk bundle Next
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event?.data?.type === "NF3_SW_UPDATED") {
+      try { sessionStorage.setItem("nf3_sw_updated", event.data.version || "1"); } catch { /* ignore */ }
+    }
+  });
+  navigator.serviceWorker.ready.then((reg) => {
+    try { reg.update(); } catch { /* ignore */ }
+  }).catch(() => {});
+}
+
+/** Paksa muat bundle terbaru — unregister SW + clear Cache Storage + reload. */
+export async function forceReloadLatestApp() {
+  if (typeof window === "undefined") return;
+  try {
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+  } catch { /* ignore */ }
+  try {
+    if (typeof caches !== "undefined") {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch { /* ignore */ }
+  const url = new URL(window.location.href);
+  url.searchParams.set("_nf3_reload", Date.now().toString(36));
+  window.location.replace(url.toString());
 }

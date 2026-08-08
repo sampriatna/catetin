@@ -117,7 +117,9 @@ import {
 } from "../../../lib/sharedWalletMirror.js";
 import { canWriteSharedBank } from "../../../lib/sharedBankWrite.js";
 import { fetchSharedBankBalances, fetchSharedBankTransactions, postSharedBankTx } from "../../../lib/repo";
-import PwaInstallBanner, { registerServiceWorker } from "../../../components/PwaInstallBanner";
+import PwaInstallBanner, { registerServiceWorker, forceReloadLatestApp } from "../../../components/PwaInstallBanner";
+import { getAppBuildLabel, getAppBuildSha, APP_SW_VERSION } from "../../../lib/buildInfo";
+import { isSectionSynced, healPendingSectionStatuses } from "../../../lib/pendingSectionHeal";
 import TransactionEditSheet from "../../../components/TransactionEditSheet";
 import { getTransactionEditPolicy, validateTransactionUpdate, applyTransactionDelete } from "../../../lib/transactionEdit";
 import { recordDailyReportDelete } from "../../../lib/dailyReportDelete";
@@ -257,13 +259,13 @@ const isoOffset = (n) => {
   return localISO(dt);
 };
 
-/** Checklist hijau hanya jika sudah committed (bukan sekadar mutate lokal). Legacy tanpa field = committed. */
+/** Checklist hijau hanya jika sudah synced/committed di pusat (bukan sekadar mutate lokal). */
 function isSectionCloudCommitted(row) {
-  if (!row) return false;
-  const st = row.commitStatus;
-  if (st === "committing" || st === "failed" || st === "pending") return false;
-  return true;
+  return isSectionSynced(row);
 }
+
+const UNSYNCED_HINT = "Belum tersinkron ke pusat — data tetap tersimpan di perangkat.";
+const SYNCED_HINT = "Sudah tersimpan di pusat.";
 
 /** Label waktu singkat untuk bar sync (WIB = jam lokal perangkat). */
 const formatSyncClock = (iso) => {
@@ -982,7 +984,7 @@ function WalletIcon({ wallet, size = 40 }) {
   );
 }
 
-function DailyTaskRow({ step, title, subtitle, done, blocked, urgent, count, optional, onClick }) {
+function DailyTaskRow({ step, title, subtitle, done, blocked, urgent, count, optional, onClick, actionLabel: actionLabelProp = null }) {
   const rowClass = [
     "task-row-inner",
     done ? "task-row-done" : urgent ? "task-row-urgent" : !blocked && !optional ? "task-row-pending" : "",
@@ -990,7 +992,7 @@ function DailyTaskRow({ step, title, subtitle, done, blocked, urgent, count, opt
   const badgeLabel = done ? "Selesai" : blocked ? "Tunggu" : urgent ? (count ? `${count} perlu` : "Perlu aksi") : optional ? "Opsional" : "Belum";
   const badgeBg = done ? "var(--in-soft)" : blocked ? "var(--surface2)" : urgent ? "#FEE2E2" : optional ? "var(--surface2)" : "#FEF3C7";
   const badgeColor = done ? "var(--in-text)" : blocked ? "var(--ink3)" : urgent ? "var(--out-text)" : optional ? "var(--ink3)" : "#B45309";
-  const actionLabel = done ? "Lihat" : urgent ? "Proses" : optional ? "Buka" : "Isi";
+  const actionLabel = actionLabelProp || (done ? "Lihat" : urgent ? "Proses" : optional ? "Buka" : "Isi");
 
   return (
     <button
@@ -1212,7 +1214,7 @@ function FnbGateSheet({ target, onClose, onSwitch, canonicalName, canSwitch }) {
 }
 
 // ─── Beranda ───────────────────────────────────────────────
-function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudSync, cloudSyncState, syncInfo, realtimeLive, bizId, session, businessDisplayName, onCatat, business, businesses, switchBusiness, features, onOpenWalletHistory, sharedMirror, sharedTxByWallet }) {
+function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudSync, onRecoverPending, cloudSyncState, syncInfo, realtimeLive, bizId, session, businessDisplayName, onCatat, business, businesses, switchBusiness, features, onOpenWalletHistory, sharedMirror, sharedTxByWallet }) {
   const cur = s.profile.currency;
   const prefix = today().slice(0, 7);
   const user = s.currentUser || { role: "kasir" };
@@ -1789,20 +1791,31 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
 
         if (role === "kasir" && features.kasirDaily && canDo(role, "inputLaporanHarian")) {
           const kasirSosmed = showSosmed && isSosmedEnabled(s.sosmedConfig, user.outlet);
+          const sdmPending = todaySdm && !isSectionCloudCommitted(todaySdm);
+          const omsetPending = (todayReport && !isSectionCloudCommitted(todayReport)) || orphanOmsetToday;
+          const sosmedPending = todaySosmed && !isSectionCloudCommitted(todaySosmed);
+          const recoverOrOpen = (focus, openFn) => {
+            if (typeof onRecoverPending === "function" && (focus === "omset" ? omsetPending : focus === "sdm" ? sdmPending : sosmedPending)) {
+              onRecoverPending({ focus });
+              return;
+            }
+            openFn();
+          };
           const tasks = [
             {
               id: "sdm",
               title: "SDM Pagi",
               subtitle: todaySdm?.commitStatus === "committing"
-                ? "Sedang mengirim ke awan…"
-                : todaySdm?.commitStatus === "failed"
-                  ? "Gagal ke awan — tap untuk kirim ulang (jangan anggap selesai)"
+                ? "Sedang mengirim ke pusat…"
+                : sdmPending
+                  ? UNSYNCED_HINT
                 : todaySdm
-                  ? `${todaySdm.headcount} orang masuk · target ${fmtMoney(todaySdm.targetOmset, cur)}`
+                  ? `${todaySdm.headcount} orang masuk · target ${fmtMoney(todaySdm.targetOmset, cur)} · ${SYNCED_HINT}`
                   : `Berapa orang masuk kerja? ${SDM_HINT[user.outlet] || "Isi angka saja"}`,
               done: isSectionCloudCommitted(todaySdm),
-              urgent: todaySdm?.commitStatus === "failed",
-              onClick: () => setOverlay("sdmHarian"),
+              urgent: sdmPending,
+              actionLabel: sdmPending ? "Sinkronkan sekarang" : null,
+              onClick: () => recoverOrOpen("sdm", () => setOverlay("sdmHarian")),
             },
             {
               id: "omset",
@@ -1810,24 +1823,32 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
               subtitle: needsRevision
                 ? `Revisi wajib (${shortDate(needsRevision.date)}) — ${needsRevision.revisionNote || "perbaiki sesuai catatan admin"}`
                 : todayReport?.commitStatus === "committing"
-                  ? "Sedang mengirim ke awan…"
-                  : todayReport?.commitStatus === "failed"
-                    ? "Gagal ke awan — jangan isi baru, tap kirim ulang"
+                  ? "Sedang mengirim ke pusat…"
+                  : omsetPending
+                    ? (orphanOmsetToday
+                      ? `${UNSYNCED_HINT} Omset di laci terdeteksi — jangan isi ulang.`
+                      : UNSYNCED_HINT)
                 : todayReport
                   ? todayReport.status === "admin_verified"
-                    ? `Total ${fmtMoney(todayReport.total, cur)} · menunggu settle owner/admin`
+                    ? `Total ${fmtMoney(todayReport.total, cur)} · menunggu settle owner/admin · ${SYNCED_HINT}`
                     : todayReport.status === "submitted"
-                      ? `Total ${fmtMoney(todayReport.total, cur)} · menunggu verifikasi admin pagi`
-                      : `Total ${fmtMoney(todayReport.total, cur)} · tercatat`
-                  : orphanOmsetToday
-                    ? "Omset di laci tanpa laporan — tap sync/pulihkan, jangan isi dobel"
+                      ? `Total ${fmtMoney(todayReport.total, cur)} · menunggu verifikasi admin pagi · ${SYNCED_HINT}`
+                      : `Total ${fmtMoney(todayReport.total, cur)} · ${SYNCED_HINT}`
                   : todaySdm
                     ? `Target ${fmtMoney(dailyTarget, cur)} · isi per channel pembayaran`
                     : "Tap untuk isi · backfill tanggal lalu boleh",
               done: isSectionCloudCommitted(todayReport) && !needsRevision,
-              urgent: !!needsRevision || orphanOmsetToday || todayReport?.commitStatus === "failed",
+              urgent: !!needsRevision || omsetPending,
               blocked: false,
-              onClick: () => (onOpenLaporan ? onOpenLaporan(needsRevision?.date || null) : setOverlay("laporanHarian")),
+              actionLabel: needsRevision ? "Proses" : omsetPending ? "Sinkronkan sekarang" : null,
+              onClick: () => {
+                if (needsRevision) {
+                  if (onOpenLaporan) onOpenLaporan(needsRevision.date || null);
+                  else setOverlay("laporanHarian");
+                  return;
+                }
+                recoverOrOpen("omset", () => (onOpenLaporan ? onOpenLaporan(null) : setOverlay("laporanHarian")));
+              },
             },
           ];
           if (kasirSosmed) {
@@ -1835,15 +1856,16 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
               id: "sosmed",
               title: "Report Sosmed",
               subtitle: todaySosmed?.commitStatus === "committing"
-                ? "Sedang mengirim ke awan…"
-                : todaySosmed?.commitStatus === "failed"
-                  ? "Gagal ke awan — tap kirim ulang"
+                ? "Sedang mengirim ke pusat…"
+                : sosmedPending
+                  ? UNSYNCED_HINT
                 : todaySosmed
-                  ? `${sosmedDisplayName(user.outlet)} · sudah dilaporkan hari ini`
+                  ? `${sosmedDisplayName(user.outlet)} · ${SYNCED_HINT}`
                   : `${sosmedDisplayName(user.outlet)} · DM, komentar, review, komplain`,
               done: isSectionCloudCommitted(todaySosmed),
-              urgent: todaySosmed?.commitStatus === "failed",
-              onClick: () => setOverlay("sosmedHarian"),
+              urgent: sosmedPending,
+              actionLabel: sosmedPending ? "Sinkronkan sekarang" : null,
+              onClick: () => recoverOrOpen("sosmed", () => setOverlay("sosmedHarian")),
             });
           }
           return (
@@ -5859,7 +5881,7 @@ function AdjustSaldoScreen({ s, mutate, onClose, user, business }) {
 }
 
 // ─── Settings & Profil ─────────────────────────────────────
-function PengaturanScreen({ s, mutate, onClose, setOverlay, setTab, bizId, authUser, signOut, businesses, switchBusiness, businessDisplayName, features, business }) {
+function PengaturanScreen({ s, mutate, onClose, setOverlay, setTab, bizId, authUser, signOut, businesses, switchBusiness, businessDisplayName, features, business, onCloudSync = null }) {
   const role = s.currentUser?.role || "kasir";
   const isKasir = role === "kasir";
   const isPurchasing = role === "purchasing";
@@ -6114,6 +6136,41 @@ function PengaturanScreen({ s, mutate, onClose, setOverlay, setTab, bizId, authU
             </div>
           </div>
         )}
+
+        <Lbl>Versi aplikasi</Lbl>
+        <Card style={{ overflow: "hidden", marginBottom: 16, padding: "12px 14px" }}>
+          <div style={{ fontSize: 12, color: "var(--ink2)", lineHeight: 1.5 }}>
+            Build: <b style={{ color: "var(--ink)", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>{getAppBuildLabel()}</b>
+            <span style={{ color: "var(--ink3)" }}> · SHA {getAppBuildSha()}</span>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--ink3)", marginTop: 4 }}>
+            SW {APP_SW_VERSION}. Bandingkan dengan versi server setelah update.
+          </div>
+          <button
+            type="button"
+            onClick={() => forceReloadLatestApp()}
+            style={{
+              marginTop: 10, width: "100%", padding: "11px 12px", borderRadius: 12,
+              border: "1px solid var(--brand)", background: "var(--brand-soft)", color: "var(--brand-text)",
+              fontWeight: 700, fontSize: 13, cursor: "pointer",
+            }}
+          >
+            Muat ulang aplikasi (pakai versi terbaru)
+          </button>
+          {typeof onCloudSync === "function" && (
+            <button
+              type="button"
+              onClick={() => onCloudSync()}
+              style={{
+                marginTop: 8, width: "100%", padding: "11px 12px", borderRadius: 12,
+                border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)",
+                fontWeight: 700, fontSize: 13, cursor: "pointer",
+              }}
+            >
+              Sinkronkan sekarang
+            </button>
+          )}
+        </Card>
 
         <Lbl>Akun</Lbl>
         <Card style={{ overflow: "hidden", marginBottom: 16 }}>
@@ -7671,8 +7728,11 @@ export default function NF3App(props) {
           source: "sync",
         });
       }
-      setS(mergeLoadedDoc(nextDoc));
-      sRef.current = { ...(sRef.current || {}), ...nextDoc };
+      // Heal checklist: data pusat sudah ada → synced (jangan biarkan failed menahan UI)
+      healPendingSectionStatuses(nextDoc);
+      const loaded = mergeLoadedDoc(nextDoc);
+      setS(loaded);
+      sRef.current = loaded;
       allowSaveRef.current = true;
       const meta = buildSyncMeta(nextDoc, prev);
       setSyncInfo(meta);
@@ -7721,6 +7781,65 @@ export default function NF3App(props) {
       cloudSyncBusyRef.current = false;
     }
   }, [bizId, business?.type, mergeLoadedDoc, flushSave]);
+
+  /**
+   * Pemulihan aman dari checklist "Sinkronkan sekarang":
+   * flush pending → pull pusat → bind by slot/idempotency — tanpa create identitas baru.
+   */
+  const recoverPendingKasirSections = useCallback(async ({ focus = "omset" } = {}) => {
+    if (!bizId) {
+      showActionToast("Belum ada bisnis aktif.", "error");
+      return;
+    }
+    if (cloudSyncBusyRef.current) {
+      showActionToast("Masih menyinkronkan… tunggu sebentar.", "info", 2200);
+      return;
+    }
+    showActionToast("Menyinkronkan data pending ke pusat… jangan isi ulang.", "info", 5000);
+    logDailyReportStage("RECOVER_PENDING_START", {
+      outletCode: sRef.current?.currentUser?.outlet || null,
+      focus,
+      source: "checklist_sync",
+      reportType: focus === "omset" ? "omzet" : focus,
+    });
+    try {
+      await reloadFromCloud({ manual: true });
+      const after = sRef.current;
+      healPendingSectionStatuses(after || {});
+      if (after) {
+        setS((prev) => (prev ? { ...prev, ...after, dailyReports: after.dailyReports, sdmReports: after.sdmReports, sosmedReports: after.sosmedReports } : prev));
+      }
+      const outlet = after?.currentUser?.outlet || sRef.current?.currentUser?.outlet;
+      const d = todayLocal();
+      const omzet = (after?.dailyReports || []).find((r) => r.outlet === outlet && (r.date === d || r.date?.startsWith?.(d)));
+      const sdm = (after?.sdmReports || []).find((r) => r.outlet === outlet && r.date === d);
+      const sosmed = (after?.sosmedReports || []).find((r) => r.outlet === outlet && r.date === d);
+      const focusRow = focus === "sdm" ? sdm : focus === "sosmed" ? sosmed : omzet;
+      logDailyReportStage("RECOVER_PENDING_DONE", {
+        outletCode: outlet,
+        focus,
+        result: focusRow && isSectionSynced(focusRow) ? "synced" : "still_pending",
+        serverRecordId: focusRow?.serverRecordId || focusRow?.id || null,
+        syncStatus: focusRow?.syncStatus || null,
+        source: "checklist_sync",
+      });
+      if (focusRow && isSectionSynced(focusRow)) {
+        showActionToast(SYNCED_HINT, "success", 4000);
+      } else if (focus === "omset" && !omzet) {
+        showActionToast("Belum ada laporan omzet di pusat untuk hari ini. Buka form hanya jika benar-benar belum pernah mengisi.", "info", 5500);
+      } else {
+        showActionToast("Sinkron selesai. Jika masih belum hijau, tap ☁️ sekali lagi — jangan isi ulang.", "info", 5000);
+      }
+    } catch (e) {
+      logDailyReportStage("RECOVER_PENDING_FAILED", {
+        focus,
+        result: "failed",
+        error: e?.message || String(e),
+        source: "checklist_sync",
+      });
+      showActionToast(e?.message || "Gagal sinkron. Coba lagi — jangan isi ulang laporan.", "error");
+    }
+  }, [bizId, reloadFromCloud]);
 
   // Muat dokumen state bisnis aktif dari Supabase + suntik identitas login nyata.
   useEffect(() => {
@@ -8411,12 +8530,12 @@ export default function NF3App(props) {
           </div>
         )}
         <div className="nf3-scroll scroll-hide">
-          {tab === "beranda"  && <Beranda s={view} setTab={setTab} setOverlay={openOverlay} onOpenLaporan={openLaporanHarian} hide={hide} setHide={setHide} onCloudSync={() => reloadFromCloud({ manual: true })} cloudSyncState={cloudSyncState} syncInfo={syncInfo} realtimeLive={realtimeLive} bizId={bizId} session={session} businessDisplayName={businessDisplayName} onCatat={openCatat} business={business} businesses={businesses} switchBusiness={switchBusiness} features={features} onOpenWalletHistory={openWalletHistory} sharedMirror={sharedMirror} sharedTxByWallet={sharedTxByWallet} />}
+          {tab === "beranda"  && <Beranda s={view} setTab={setTab} setOverlay={openOverlay} onOpenLaporan={openLaporanHarian} hide={hide} setHide={setHide} onCloudSync={() => reloadFromCloud({ manual: true })} onRecoverPending={recoverPendingKasirSections} cloudSyncState={cloudSyncState} syncInfo={syncInfo} realtimeLive={realtimeLive} bizId={bizId} session={session} businessDisplayName={businessDisplayName} onCatat={openCatat} business={business} businesses={businesses} switchBusiness={switchBusiness} features={features} onOpenWalletHistory={openWalletHistory} sharedMirror={sharedMirror} sharedTxByWallet={sharedTxByWallet} />}
           {tab === "laporan"  && <Laporan s={view} mutate={mutate} onOpenPair={() => openOverlay("pair")} onOpenPurchasingReport={() => openOverlay("laporanPurchasing")} business={business} features={features} webMode={effectiveWebMode} sharedTxByWallet={sharedTxByWallet} bizId={bizId} />}
           {tab === "void" && features.voidOutlet && canDo(user.role, "inputVoid") && <VoidScreen s={view} mutate={mutate} user={user} />}
           {tab === "analisis" && features.fnbAnalisis && canDo(user.role, "lihatAnalisis") && <Analisis s={view} hideInsight={(id) => mutate(d => { if (!d.hiddenInsights) d.hiddenInsights = []; d.hiddenInsights.push(id); })} />}
           {tab === "asisten" && features.purchasingModule && showPurchasingAsistenTab(user.role) && <AsistenPurchasing s={view} bizId={bizId} />}
-          {tab === "profil"   && <PengaturanScreen s={view} mutate={mutate} onClose={() => setTab("beranda")} setOverlay={openOverlay} bizId={bizId} authUser={authUser} signOut={signOut} businesses={businesses} switchBusiness={switchBusiness} businessDisplayName={businessDisplayName} features={features} business={business} />}
+          {tab === "profil"   && <PengaturanScreen s={view} mutate={mutate} onClose={() => setTab("beranda")} setOverlay={openOverlay} bizId={bizId} authUser={authUser} signOut={signOut} businesses={businesses} switchBusiness={switchBusiness} businessDisplayName={businessDisplayName} features={features} business={business} onCloudSync={() => reloadFromCloud({ manual: true })} />}
         </div>
         {!effectiveWebMode && <PwaInstallBanner />}
         <NavBar tab={tab} setTab={setTab} user={user} business={business}
