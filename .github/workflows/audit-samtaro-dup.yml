@@ -1,0 +1,68 @@
+# Read-only Samtaro duplicate audit against production app_state.
+# Secrets (repository Actions secrets — server-side only):
+#   SUPABASE_URL                 (preferred) OR use NEXT_PUBLIC_SUPABASE_URL
+#   SUPABASE_SERVICE_ROLE_KEY    (NEVER publish / NEVER NEXT_PUBLIC_*)
+#
+# workflow_dispatch only — tidak mengubah data.
+name: Audit Samtaro duplicates (read-only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Optional operational date YYYY-MM-DD (empty = all SMT duplicate slots)"
+        required: false
+        default: ""
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install deps
+        run: npm ci --ignore-scripts
+
+      - name: Guard — reject public service-role
+        run: |
+          if [ -n "${{ secrets.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY }}" ]; then
+            echo "NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY must not exist"
+            exit 1
+          fi
+
+      - name: Run read-only audit
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NF3_BUSINESS_ID: ${{ secrets.NF3_BUSINESS_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "Missing SUPABASE_SERVICE_ROLE_KEY in Actions secrets"
+            exit 2
+          fi
+          if [ -z "${SUPABASE_URL:-}${NEXT_PUBLIC_SUPABASE_URL:-}" ]; then
+            echo "Missing SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL"
+            exit 2
+          fi
+          if [ -n "${{ inputs.date }}" ]; then
+            node scripts/auditSamtaroDuplicates.mjs --date=${{ inputs.date }}
+          else
+            npm run audit:samtaro-dup
+          fi
+
+      - name: Upload redacted audit artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: samtaro-audit-readonly
+          path: docs/AUDIT_SAMTARO_DUPLICATES_RUNTIME.json
+          if-no-files-found: warn
