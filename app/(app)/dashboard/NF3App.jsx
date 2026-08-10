@@ -50,7 +50,7 @@ import {
   sumInOut, formatPeriodLabel, localISO, todayLocal,
 } from "../../../lib/laporanKeuangan";
 import { computeNfProfit } from "../../../lib/nfProfitReport";
-import { submitDailyReport, resubmitDailyReport, settleDailyReport, verifyDailyReportAdmin, requestDailyReportRevision, deleteDailyReport, collectAllDailyReportTxIds, pendingReports, reportsAwaitingVerify, reportsReadyToSettle, reportsAwaitingRevision, reportsForDate, findPendingRevisionReport, reportAwaitingKasirRevision, reportCashAmount, reportSettleUrgency, reportSettleDeadlineLabel, reconcileDailyReports, allDailyReportsForAdmin, applyDailyReportMutation, makeDailyReportSubmissionId, makeSmtOmzetIdempotencyKey, logDailyReportStage, LACI_BY_OUTLET, LACI_FLOOR, countSmtSubmissionArtifacts, hasOrphanLaporanCashSlot, findCommittedDailyReport, recoverDailyReportFromOrphanCash, isUncertainDeliveryError, userFacingDailyReportError } from "../../../lib/kasirHarian";
+import { submitDailyReport, resubmitDailyReport, settleDailyReport, verifyDailyReportAdmin, requestDailyReportRevision, deleteDailyReport, collectAllDailyReportTxIds, pendingReports, reportsAwaitingVerify, reportsReadyToSettle, reportsAwaitingRevision, reportsForDate, findPendingRevisionReport, reportAwaitingKasirRevision, reportCashAmount, reportSettleUrgency, reportSettleDeadlineLabel, reconcileDailyReports, allDailyReportsForAdmin, applyDailyReportMutation, makeDailyReportSubmissionId, makeSmtOmzetIdempotencyKey, logDailyReportStage, LACI_BY_OUTLET, LACI_FLOOR, laciSettleCheck, countSmtSubmissionArtifacts, hasOrphanLaporanCashSlot, findCommittedDailyReport, recoverDailyReportFromOrphanCash, isUncertainDeliveryError, userFacingDailyReportError } from "../../../lib/kasirHarian";
 import { submitVoidLog, pendingVoidLogs, reviewVoidLog, visibleVoidLogs, VOID_TYPES } from "../../../lib/voidLog";
 import {
   submitSdmReport, buildSdmSnapshot, getOutletConfig, todaySdmReport,
@@ -90,7 +90,7 @@ import {
 import { pairPageUrl } from "../../../lib/appUrl.js";
 import { exportKeuanganCsv, exportKeuanganPdf } from "../../../lib/laporanKeuanganExport.js";
 import { compressWalletLogo, walletHasLogo } from "../../../lib/walletLogo.js";
-import { patchWalletCatalog, sortWallets, migrateReportChannelSettles, foodWalletDisplayName } from "../../../lib/wallets.js";
+import { patchWalletCatalog, sortWallets, migrateReportChannelSettles, foodWalletDisplayName, isLockedLaciWallet, LACI_PLAFOND } from "../../../lib/wallets.js";
 import {
   NF_FNB_WALLETS,
   getWalletCatalogForBusiness,
@@ -492,16 +492,17 @@ const checkFloor = (walletId, amount, wallets, transactions, user) => {
   if (isSharedWallet(w)) return null;
   const bal = walletBalance(walletId, wallets, transactions);
   const hidden = shouldHideWalletBalance(w, user);
-  if (!w.floor && bal - amount < 0) {
+  const floor = isLockedLaciWallet(w) ? LACI_FLOOR : (w.floor || 0);
+  if (!floor && bal - amount < 0) {
     return hidden
       ? `Saldo ${w.name} tidak cukup untuk transaksi ini.`
       : `Saldo tidak cukup. Saldo saat ini: ${new Intl.NumberFormat("id-ID").format(bal)}`;
   }
-  if (!w.floor) return null;
-  if (bal - amount < w.floor) {
+  if (!floor) return null;
+  if (bal - amount < floor) {
     return hidden
       ? `Saldo ${w.name} tidak cukup untuk transaksi ini.`
-      : `Saldo tidak cukup. Minimum saldo: ${new Intl.NumberFormat("id-ID").format(w.floor)} · Saldo saat ini: ${new Intl.NumberFormat("id-ID").format(bal)}`;
+      : `Saldo tidak cukup. Minimum saldo: ${new Intl.NumberFormat("id-ID").format(floor)} · Saldo saat ini: ${new Intl.NumberFormat("id-ID").format(bal)}`;
   }
   return null;
 };
@@ -1637,12 +1638,13 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
         )}
         {localOrderedWallets.map(w => {
           const bal = walletBalance(w.id, s.wallets, s.transactions);
-          const laciWarn = isLaciOutletWallet(w) && bal < (w.floor ?? LACI_FLOOR);
-          const floorHint = !isPaylaterWallet(w) && !laciWarn ? walletFloorHint(bal, w.floor) : null;
+          const laciFloor = isLaciOutletWallet(w) ? LACI_FLOOR : (w.floor || 0);
+          const laciWarn = isLaciOutletWallet(w) && bal < laciFloor;
+          const floorHint = !isPaylaterWallet(w) && !laciWarn ? walletFloorHint(bal, laciFloor || w.floor) : null;
           const nearFloor = !!floorHint;
           const paylaterDebt = isPaylaterWallet(w) && bal < 0;
           const balHidden = shouldHideWalletBalance(w, user);
-          const laciPres = laciWarn ? laciBalancePresentation(bal, fmtMoney, cur, w.floor) : null;
+          const laciPres = laciWarn ? laciBalancePresentation(bal, fmtMoney, cur, laciFloor) : null;
           return (
             <Card
               key={w.id}
@@ -4851,13 +4853,14 @@ function SettleReportCard({ r, s, cur, user, onVerify, onRevision, onSettle, onD
   const dayVoids = (s.voidLogs || []).filter(v => v.outlet === r.outlet && v.date === r.date);
   const pendingVoids = dayVoids.filter(v => v.status === "submitted");
   const walletId = LACI_BY_OUTLET[r.outlet];
-  const laciBal = walletId ? walletBalance(walletId, s.wallets, s.transactions) : 0;
-  const floor = r.laciFloor || LACI_FLOOR;
-  const expectedLaci = floor + cash;
-  const laciDiff = laciBal - expectedLaci;
-  const laciOk = Math.abs(laciDiff) <= 1000;
-  const laciOver = laciDiff > 1000;
-  const laciUnder = laciDiff < -1000;
+  const laciCheck = laciSettleCheck(s, r);
+  const laciBal = laciCheck.balance;
+  const floor = laciCheck.floor || LACI_FLOOR;
+  const expectedLaci = laciCheck.expectedBefore;
+  const laciDiff = laciCheck.diff;
+  const laciOk = laciCheck.ok;
+  const laciOver = laciDiff > 0 && !laciOk;
+  const laciUnder = laciDiff < 0 && !laciOk;
   const urgency = reportSettleUrgency(r);
   const statusLabel = {
     submitted: "Menunggu verifikasi",
@@ -4889,21 +4892,51 @@ function SettleReportCard({ r, s, cur, user, onVerify, onRevision, onSettle, onD
         <div style={{ fontSize: 12, marginBottom: 10, padding: "10px 12px", borderRadius: 10, background: laciOk ? "var(--in-soft)" : "var(--amber-soft)", lineHeight: 1.5 }}>
           <div style={{ fontWeight: 700, color: "var(--ink)", marginBottom: 4 }}>Periksa dompet laci {r.outlet}</div>
           <div>Saldo sistem: <b>{fmtMoney(laciBal, cur)}</b></div>
-          <div>Harusnya (floor + tunai): <b>{fmtMoney(expectedLaci, cur)}</b></div>
+          <div>Harusnya (modal {fmtMoney(floor, cur)} + tunai): <b>{fmtMoney(expectedLaci, cur)}</b></div>
           {!laciOk && (
             <div style={{ color: "#92400E", fontWeight: 700, marginTop: 4, lineHeight: 1.45 }}>
-              ⚠ Selisih besar
+              ⚠ Uang selisih — settle ditolak sampai laci kembali modal {fmtMoney(floor, cur)}.
               {laciOver
-                ? " — kemungkinan duplikat omset tunai dari revisi."
+                ? " Kemungkinan omzet tunai dobel / transaksi ekstra."
                 : laciUnder
-                  ? " — transaksi tunai belum masuk laci (atau sudah terhapus)."
-                  : "."}
+                  ? " Modal kurang dari 250rb, atau omset tunai belum masuk / ada pengeluaran."
+                  : ""}
+              {" "}Mohon minta revisi ke kasir (tombol di bawah).
               {onDelete
-                ? " Gunakan tombol merah Hapus laporan di bawah (bukan hapus transaksi satu-satu di Laporan)."
-                : " Minta kasir revisi atau hubungi admin."}
+                ? " Atau hapus laporan lalu kasir isi ulang dari awal."
+                : ""}
+            </div>
+          )}
+          {laciOk && (
+            <div style={{ color: "var(--in-text)", fontWeight: 600, marginTop: 4 }}>
+              ✓ Laci cocok — setelah settle modal stabil {fmtMoney(floor, cur)}.
             </div>
           )}
         </div>
+      )}
+      {!laciOk && (r.status === "submitted" || r.status === "admin_verified") && (
+        <button
+          type="button"
+          disabled={busy === r.id}
+          onClick={() => {
+            setRevisingId(r.id);
+            setRevisionNote(laciCheck.revisionNoteSuggestion || "");
+          }}
+          style={{
+            width: "100%",
+            marginBottom: 10,
+            padding: 11,
+            borderRadius: 12,
+            border: "2px solid var(--out-text)",
+            background: "var(--out-soft)",
+            color: "var(--out-text)",
+            fontWeight: 800,
+            fontSize: 13,
+            cursor: "pointer",
+          }}
+        >
+          Minta revisi ke kasir — uang selisih
+        </button>
       )}
       {!laciOk && onDelete && r.status !== "settled" && (
         <div style={{ marginBottom: 10 }}>
@@ -4974,13 +5007,16 @@ function SettleReportCard({ r, s, cur, user, onVerify, onRevision, onSettle, onD
           {r.status === "admin_verified" && (
             <button disabled={busy === r.id || pendingVoids.length > 0 || !laciOk} onClick={() => onSettle(r.id)}
               style={{ width: "100%", padding: 11, borderRadius: 12, border: "none", background: (pendingVoids.length || !laciOk) ? "var(--ink3)" : "var(--brand)", color: "#fff", fontWeight: 700, fontSize: 13, cursor: (pendingVoids.length || !laciOk) ? "default" : "pointer", opacity: busy === r.id ? .6 : 1 }}>
-              {busy === r.id ? "Memproses…" : pendingVoids.length ? "Review void dulu" : !laciOk ? "Perbaiki selisih laci dulu" : "Settle → Kas Besar & Rekening"}
+              {busy === r.id ? "Memproses…" : pendingVoids.length ? "Review void dulu" : !laciOk ? "Settle ditolak — selisih laci" : "Settle → Kas Besar & Rekening"}
             </button>
           )}
           {(r.status === "submitted" || r.status === "admin_verified") && (
-            <button type="button" disabled={busy === r.id} onClick={() => { setRevisingId(r.id); setRevisionNote(""); }}
+            <button type="button" disabled={busy === r.id} onClick={() => {
+              setRevisingId(r.id);
+              setRevisionNote(!laciOk && laciCheck.revisionNoteSuggestion ? laciCheck.revisionNoteSuggestion : "");
+            }}
               style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--out-text)", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
-              Minta revisi kasir
+              {laciOk ? "Minta revisi kasir" : "Minta revisi kasir (uang selisih)"}
             </button>
           )}
           {r.status !== "revision_requested" && (
@@ -6293,6 +6329,8 @@ function WalletScreen({ s, mutate, onClose, user, bizId, businesses = [], featur
       updatedAt: new Date().toISOString(),
       ...(isPaylater ? { type: "paylater", liability: true, allowNegative: true } : {}),
       ...(!features?.isFnB ? { outlet: null, allowedOutlets: [] } : {}),
+      // KBU/KSM/SMT: plafond tetap 250rb — tidak boleh diubah dari setting.
+      ...(isLockedLaciWallet(w) ? { floor: LACI_PLAFOND } : {}),
     };
     mutate(d => {
       const i = d.wallets.findIndex(x => x.id === normalized.id);
@@ -6591,8 +6629,31 @@ function WalletScreen({ s, mutate, onClose, user, bizId, businesses = [], featur
                       : "Saldo = saldo awal + transaksi masuk/keluar."}
                   </div>
                 </Fld>
-                <Fld label="Floor minimum (Rp)">
-                  <input inputMode="numeric" value={edit.floor ? new Intl.NumberFormat("id-ID").format(edit.floor) : ""} onChange={e => setEdit({ ...edit, floor: +e.target.value.replace(/\D/g, "") })} placeholder="0" style={{ width: "100%", padding: "11px 14px", borderRadius: 12, border: "1px solid var(--line)", background: "var(--surface)", fontSize: 14, color: "var(--ink)", outline: "none" }} />
+                <Fld label={isLockedLaciWallet(edit) ? "Plafond / modal (Rp)" : "Floor minimum (Rp)"}>
+                  <input
+                    inputMode="numeric"
+                    disabled={isLockedLaciWallet(edit)}
+                    value={isLockedLaciWallet(edit)
+                      ? new Intl.NumberFormat("id-ID").format(LACI_PLAFOND)
+                      : (edit.floor ? new Intl.NumberFormat("id-ID").format(edit.floor) : "")}
+                    onChange={e => {
+                      if (isLockedLaciWallet(edit)) return;
+                      setEdit({ ...edit, floor: +e.target.value.replace(/\D/g, "") });
+                    }}
+                    placeholder="0"
+                    style={{
+                      width: "100%", padding: "11px 14px", borderRadius: 12,
+                      border: "1px solid var(--line)",
+                      background: isLockedLaciWallet(edit) ? "var(--surface2)" : "var(--surface)",
+                      fontSize: 14, color: "var(--ink)", outline: "none",
+                      opacity: isLockedLaciWallet(edit) ? 0.85 : 1,
+                    }}
+                  />
+                  {isLockedLaciWallet(edit) && (
+                    <div style={{ fontSize: 11, color: "var(--ink3)", marginTop: 6, lineHeight: 1.4 }}>
+                      Tetap Rp 250.000 untuk semua laci (KBU/KSM/SMT) — tidak boleh kurang/lebih.
+                    </div>
+                  )}
                 </Fld>
               </div>
               <Fld label="Owner only (rekening bank)">
