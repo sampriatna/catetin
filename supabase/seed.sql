@@ -72,6 +72,9 @@ begin
     -- Catatan: rekening Sam yang ter-mirror dari FNB disimpan sebagai sharedLinks di
     -- app_state (JSONB), bukan di tabel relational ini — lihat createFishingWalletSetup().
     insert into public.wallets (business_id, name, type, icon, color, opening_balance, sort) values
+      (v_fishing, 'Dana Darurat',         'cash',    '🆘', '#DC2626', 0, 5),
+      (v_fishing, 'Dompet Uang Makan',    'cash',    '🍱', '#16A34A', 0, 6),
+      (v_fishing, 'Dompet Ekspedisi',     'cash',    '📦', '#0F766E', 0, 7),
       (v_fishing, 'Marketplace',          'ewallet', '📱', '#F97316', 0, 10),
       (v_fishing, 'Reseller',             'bank',    '🤝', '#0EA5E9', 0, 20),
       (v_fishing, 'Bank Mandiri Durinah', 'bank',    '🏦', '#CA8A04', 0, 30),

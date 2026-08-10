@@ -36,6 +36,11 @@ import {
 } from "../../../lib/businessFeatures";
 import { remapNfTransactions, needsNfChannelUpgrade, ensureNfFishingCategories, hasLegacyNfMpIncomeCategories } from "../../../lib/nfCategoryCatalog";
 import {
+  ekspedisiDaySummary,
+  formatEkspedisiWa,
+  EKSPEDISI_COURIERS,
+} from "../../../lib/ekspedisiReport.js";
+import {
   hydrateMpStores, mpStoresForCategory, buildMpIncomeMeta, groupNfIncomeCategories,
   createMpStoreId, nextStoreCode, NF_MP_PLATFORMS,
 } from "../../../lib/nfSalesChannels";
@@ -98,6 +103,9 @@ import {
   createWalletSetupSeed,
   createSharedWalletLink,
   rebuildWalletsWithShared,
+  ensureNfFishingWallets,
+  needsNfFishingWalletEnsure,
+  isEkspedisiWallet,
 } from "../../../lib/walletPresets.js";
 import {
   filterShareableRemoteWallets,
@@ -553,13 +561,18 @@ async function loadState(bizId, { businessType, business } = {}) {
       savedWalletList,
       { mode: mergeMode }
     );
-    const wallets = rebuildWalletsWithShared(mergedWallets, walletSetup);
     const txs = dedupeTransactionsById(savedClean.transactions || saved.transactions || []);
     const savedProfile = savedClean.profile || saved.profile || {};
     const savedCats = savedClean.categories || saved.categories || [];
-    const nfCtx = { wallets, categories: savedCats, walletSetup, profile: savedProfile };
+    const probeWallets = rebuildWalletsWithShared(mergedWallets, walletSetup);
+    const nfCtxProbe = { wallets: probeWallets, categories: savedCats, walletSetup, profile: savedProfile };
     const bizCtx = business || { type: resolvedType, name: savedProfile?.name, slug: business?.slug };
-    let isFishing = !isFnb && isNfFishingBusiness(bizCtx, nfCtx);
+    const isFishing = !isFnb && isNfFishingBusiness(bizCtx, nfCtxProbe);
+    const wallets = rebuildWalletsWithShared(
+      isFishing ? ensureNfFishingWallets(mergedWallets) : mergedWallets,
+      walletSetup
+    );
+    const nfCtx = { wallets, categories: savedCats, walletSetup, profile: savedProfile };
     let categories = isFnb
       ? ensurePurchasingCategories(
           cleanCategoryList(mergeCategoriesFromDb(base.categories, savedCats)),
@@ -3329,11 +3342,12 @@ function ManualForm({ s, mutate, onNotify, onReady, business, features }) {
   const storeRequired = storeOptions.length > 0;
 
   useEffect(() => {
-    if (type !== "in" || !selectedCat?.defaultWalletId) return;
+    if (!selectedCat?.defaultWalletId) return;
+    if (type !== "in" && type !== "out") return;
     if (myWallets.some((w) => w.id === selectedCat.defaultWalletId)) {
       setWalletId(selectedCat.defaultWalletId);
     }
-    setStoreId("");
+    if (type === "in") setStoreId("");
   }, [catId, type, selectedCat?.defaultWalletId, walletIds]);
 
   const typeColors = { in: "var(--in)", out: "var(--out)", transfer: "var(--brand)" };
@@ -7412,6 +7426,8 @@ function WalletHistoryScreen({ s, business, walletId, onClose, sharedTxByWallet,
   const isShared = isSharedWallet({ id: walletId });
   const [loadingShared, setLoadingShared] = useState(false);
   const [sharedTxLocal, setSharedTxLocal] = useState(null);
+  const [reportDate, setReportDate] = useState(today());
+  const [courierLabel, setCourierLabel] = useState("JNE");
 
   useEffect(() => {
     if (!isShared || !bizId) return;
@@ -7446,6 +7462,7 @@ function WalletHistoryScreen({ s, business, walletId, onClose, sharedTxByWallet,
     [s.wallets, user, business]
   );
   const wallet = myWallets.find((w) => w.id === walletId) || s.wallets.find((w) => w.id === walletId);
+  const showEkspedisiReport = !isShared && isEkspedisiWallet(wallet);
   const tx = useMemo(() => {
     if (!walletId) return [];
     if (isShared) {
@@ -7476,6 +7493,25 @@ function WalletHistoryScreen({ s, business, walletId, onClose, sharedTxByWallet,
     return local.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.id || "").localeCompare(a.id || ""));
   }, [allVisibleTx, walletId, isShared, sharedTxLocal, sharedTxByWallet, features?.nfChannelFinance, s.categories, bizId, user.role, user.id]);
 
+  const ekspedisiSummary = useMemo(() => {
+    if (!showEkspedisiReport) return null;
+    return ekspedisiDaySummary({
+      wallets: s.wallets,
+      transactions: s.transactions,
+      date: reportDate,
+      walletId,
+    });
+  }, [showEkspedisiReport, s.wallets, s.transactions, reportDate, walletId]);
+
+  const ekspedisiWa = useMemo(() => {
+    if (!ekspedisiSummary) return "";
+    return formatEkspedisiWa({
+      date: reportDate,
+      summary: ekspedisiSummary,
+      courierLabel,
+    });
+  }, [ekspedisiSummary, reportDate, courierLabel]);
+
   return (
     <Sheet title={`Riwayat ${wallet?.name || "Dompet"}`} onClose={onClose}>
       <div style={{ padding: "12px 16px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -7485,6 +7521,29 @@ function WalletHistoryScreen({ s, business, walletId, onClose, sharedTxByWallet,
               ? "Rekening bersama · hanya catatan yang ditulis dari NF"
               : "Dompet bersama · data dari FNB"}
           </div>
+        )}
+        {showEkspedisiReport && ekspedisiSummary && (
+          <Card style={{ padding: 14, background: "var(--surface2)", border: "1px solid var(--line)" }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "var(--ink)", marginBottom: 8 }}>Laporan harian ekspedisi</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink3)", marginBottom: 4 }}>Tanggal</div>
+                <input type="date" value={reportDate} onChange={(e) => setReportDate(e.target.value || today())}
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)", fontSize: 13 }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink3)", marginBottom: 4 }}>Kurir</div>
+                <select value={courierLabel} onChange={(e) => setCourierLabel(e.target.value)}
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)", fontSize: 13 }}>
+                  {EKSPEDISI_COURIERS.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{ fontSize: 13, color: "var(--ink2)", lineHeight: 1.55, whiteSpace: "pre-wrap", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+              {ekspedisiWa}
+            </div>
+            <ShareWaBtn text={ekspedisiWa} compact style={{ width: "100%", marginTop: 12 }} />
+          </Card>
         )}
         {loadingShared && tx.length === 0 && (
           <div style={{ textAlign: "center", color: "var(--ink3)", padding: "20px 0", fontSize: 13 }}>Memuat riwayat…</div>
@@ -8017,6 +8076,22 @@ export default function NF3App(props) {
       return patch;
     });
   }, [bizId, business, features.isFnB, s?.categories, s?.wallets, s?.walletSetup, s?.profile?.name]);
+
+  useEffect(() => {
+    if (!s || !bizId || features.isFnB) return;
+    const ctx = nfBusinessContext(s);
+    if (!isNfFinanceScope(business, ctx)) return;
+    if (!needsNfFishingWalletEnsure(s.wallets)) return;
+    setS((prev) => {
+      if (!prev || !needsNfFishingWalletEnsure(prev.wallets)) return prev;
+      const next = ensureNfFishingWallets(prev.wallets);
+      return {
+        ...prev,
+        wallets: rebuildWalletsWithShared(next, prev.walletSetup),
+        _nfWalletsEnsured: true,
+      };
+    });
+  }, [bizId, business, features.isFnB, s?.wallets, s?.walletSetup, s?.profile?.name]);
 
   const canonicalBusiness = useMemo(() => findCanonicalInList(businesses), [businesses]);
 
