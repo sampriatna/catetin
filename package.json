@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev -p 3001",
     "build": "next build",
-    "test:kasir": "node lib/kasirHarian.test.mjs && node lib/kasirHarian.idempotency.test.mjs && node lib/kasirHarian.sync.test.mjs && node lib/kasirHarian.duplicate.test.mjs && node lib/kasirHarian.smtOnce.test.mjs && node lib/kasirHarian.smtDate7.test.mjs && node lib/kasirHarian.smtIdempotency.test.mjs && node lib/kasirHarian.smtSync.test.mjs && node lib/kasirHarian.laciSelisih.test.mjs && node lib/pendingSectionHeal.test.mjs && node lib/dailyReportDelete.test.mjs && node lib/kasirHarian.falseSuccess.test.mjs",
+    "test:kasir": "node lib/kasirHarian.test.mjs && node lib/kasirHarian.idempotency.test.mjs && node lib/kasirHarian.sync.test.mjs && node lib/kasirHarian.duplicate.test.mjs && node lib/kasirHarian.smtOnce.test.mjs && node lib/kasirHarian.smtDate7.test.mjs && node lib/kasirHarian.smtIdempotency.test.mjs && node lib/kasirHarian.smtSync.test.mjs && node lib/kasirHarian.laciSelisih.test.mjs && node lib/appState.allOutletCashRecovery.test.mjs && node lib/pendingSectionHeal.test.mjs && node lib/dailyReportDelete.test.mjs && node lib/kasirHarian.falseSuccess.test.mjs",
     "test:sdm": "node lib/sdmHarian.test.mjs",
     "test:laporan": "node lib/laporanKeuangan.test.mjs",
     "audit:ksm-smt": "node scripts/auditKsmSmtAug2026.mjs",
