@@ -7,7 +7,7 @@ import LaporanPurchasing from "../../../components/LaporanPurchasing";
 import AsistenPurchasing from "../../../components/AsistenPurchasing";
 import NfBelanjaSearch from "../../../components/NfBelanjaSearch";
 import PurchasingAliasesReview from "../../../components/PurchasingAliasesReview";
-import { loadAppState, saveAppState, mergeAppStateData, mergeAppStateFromCloudPull, mergeCategoriesFromDb, cleanCategoryList, ensurePurchasingCategories, dedupeTransactionsById, aiParse, fetchBusinessAnalysis } from "../../../lib/appState";
+import { loadAppState, loadAppStateUpdatedAt, saveAppState, mergeAppStateData, mergeAppStateFromCloudPull, mergeCategoriesFromDb, cleanCategoryList, ensurePurchasingCategories, dedupeTransactionsById, aiParse, fetchBusinessAnalysis } from "../../../lib/appState";
 import { checkPurchasingFloor } from "../../../lib/purchasingExpense";
 import { normalizeTransaction, normalizeTransactions, resolveWalletId, resolveTransferIds } from "../../../lib/transactionNormalize";
 import CategoryQuickManage from "../../../components/CategoryQuickManage.jsx";
@@ -8030,25 +8030,38 @@ export default function NF3App(props) {
     };
   }, [bizId, reloadFromCloud, flushSave]);
 
-  // Cadangan poll (jika realtime putus) + saat tab aktif kembali
+  // Cadangan poll hanya saat realtime putus. Cek versi kecil dulu; dokumen penuh
+  // baru ditarik jika updated_at memang berubah. Saat tab kembali aktif tetap cek
+  // sekali untuk menangkap update yang mungkin terlewat ketika browser tidur.
   useEffect(() => {
     if (!bizId) return;
-    const tick = () => {
+    let cancelled = false;
+    const tick = async () => {
       if (document.visibilityState !== "visible") return;
       if (catatRef.current || isUserTypingInForm()) return;
       if (overlayRef.current === "laporanHarian") return;
-      reloadFromCloud();
+      try {
+        const updatedAt = await loadAppStateUpdatedAt(bizId);
+        if (cancelled || !updatedAt) return;
+        if (lastOwnSaveAtRef.current && updatedAt === lastOwnSaveAtRef.current) return;
+        if (sRef.current?._cloudUpdatedAt && updatedAt === sRef.current._cloudUpdatedAt) return;
+        await reloadFromCloud({ source: "poll" });
+      } catch (e) {
+        // Poll hanyalah cadangan. Jangan ganggu input staf; coba lagi pada siklus berikutnya.
+        console.warn("[app_state poll]", e);
+      }
     };
-    const id = setInterval(tick, CLOUD_POLL_FALLBACK_MS);
+    const id = realtimeLive ? null : setInterval(tick, CLOUD_POLL_FALLBACK_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible") tick();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
-      clearInterval(id);
+      cancelled = true;
+      if (id) clearInterval(id);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [bizId, reloadFromCloud]);
+  }, [bizId, realtimeLive, reloadFromCloud]);
 
   const user = useMemo(() => sessionUser(authUser), [authUser]);
   const view = useMemo(() => {
