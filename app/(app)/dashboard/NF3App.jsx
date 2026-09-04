@@ -96,6 +96,7 @@ import { pairPageUrl } from "../../../lib/appUrl.js";
 import { exportKeuanganCsv, exportKeuanganPdf } from "../../../lib/laporanKeuanganExport.js";
 import { compressWalletLogo, walletHasLogo } from "../../../lib/walletLogo.js";
 import { patchWalletCatalog, sortWallets, migrateReportChannelSettles, foodWalletDisplayName, isLockedLaciWallet, LACI_PLAFOND } from "../../../lib/wallets.js";
+import TikTokGoSettlementPanel from "../../../components/TikTokGoSettlementPanel.jsx";
 import {
   NF_FNB_WALLETS,
   getWalletCatalogForBusiness,
@@ -434,6 +435,7 @@ const defaultState = () => ({
     { id: "ci_qris_bca", name: "Penjualan QRIS BCA", type: "in", active: true, role: null },
     { id: "ci_qris_bri", name: "Penjualan QRIS BRI", type: "in", active: true, role: null },
     { id: "ci_gojek", name: "Penjualan Gojek", type: "in", active: true, role: null },
+    { id: "ci_tiktok_go", name: "Penjualan TikTok Go", type: "in", active: true, role: null },
     { id: "ci4", name: "Modal Masuk", type: "in", active: true, role: null },
     { id: "ci5", name: "Lain-lain", type: "in", active: true, role: null },
     { id: "cp1", name: "Bahan Baku", type: "out", active: true, role: "purchasing", icon: "shopping-bag", color: "#1D9E75", sort: 1, accounting_group: "hpp", description: "Ayam, beras, sayur, bumbu, susu, kopi, minyak. Bisa habis untuk membuat menu." },
@@ -449,6 +451,7 @@ const defaultState = () => ({
     { id: "cp11", name: "Pembelian Aset", type: "out", active: true, role: "purchasing", icon: "device-laptop", color: "#534AB7", sort: 11, accounting_group: "aset", description: "Kulkas, freezer, AC, mesin kopi, laptop, tablet, meja besar. Barang mahal dan tahan lama." },
     { id: "cp12", name: "Keperluan Owner", type: "out", active: true, role: "purchasing", icon: "user", color: "#888780", sort: 12, accounting_group: "pribadi", description: "Pengambilan atau pembelian untuk kebutuhan pribadi owner. Bukan biaya usaha." },
     { id: "cp13", name: "Lain-lain", type: "out", active: true, role: "purchasing", icon: "dots", color: "#B4B2A9", sort: 13, accounting_group: "lain", description: "Wajib isi keterangan di kolom catatan." },
+    { id: "co_tiktok_go", name: "Biaya/Potongan TikTok Go", type: "out", active: true, role: null, icon: "receipt", color: "#111827", sort: 14, accounting_group: "potongan_penjualan", description: "Biaya platform, komisi creator/affiliate, refund, promo merchant, dan potongan TikTok Go lainnya." },
   ],
   transactions: [],
   dailyReports: [],
@@ -7421,7 +7424,7 @@ function VoidScreen({ s, mutate, user, reviewOnly = false }) {
   );
 }
 
-function WalletHistoryScreen({ s, business, walletId, onClose, sharedTxByWallet, bizId, features }) {
+function WalletHistoryScreen({ s, business, walletId, onClose, sharedTxByWallet, bizId, features, mutate, onCriticalSave }) {
   const user = s.currentUser || { role: "kasir" };
   const isShared = isSharedWallet({ id: walletId });
   const [loadingShared, setLoadingShared] = useState(false);
@@ -7463,6 +7466,7 @@ function WalletHistoryScreen({ s, business, walletId, onClose, sharedTxByWallet,
   );
   const wallet = myWallets.find((w) => w.id === walletId) || s.wallets.find((w) => w.id === walletId);
   const showEkspedisiReport = !isShared && isEkspedisiWallet(wallet);
+  const showTikTokGoSettlement = !isShared && walletId === "w_tiktok_go";
   const tx = useMemo(() => {
     if (!walletId) return [];
     if (isShared) {
@@ -7521,6 +7525,14 @@ function WalletHistoryScreen({ s, business, walletId, onClose, sharedTxByWallet,
               ? "Rekening bersama · hanya catatan yang ditulis dari NF"
               : "Dompet bersama · data dari FNB"}
           </div>
+        )}
+        {showTikTokGoSettlement && (
+          <TikTokGoSettlementPanel
+            s={s}
+            user={user}
+            mutate={mutate}
+            onCriticalSave={onCriticalSave}
+          />
         )}
         {showEkspedisiReport && ekspedisiSummary && (
           <Card style={{ padding: 14, background: "var(--surface2)", border: "1px solid var(--line)" }}>
@@ -8747,6 +8759,8 @@ export default function NF3App(props) {
             sharedTxByWallet={sharedTxByWallet}
             bizId={bizId}
             features={features}
+            mutate={mutate}
+            onCriticalSave={() => scheduleImmediateSave({ critical: true })}
             onClose={() => {
               setWalletHistoryId(null);
               setOverlay(null);
