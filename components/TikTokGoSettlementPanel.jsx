@@ -218,7 +218,7 @@ export default function TikTokGoSettlementPanel({ s, user, mutate, onCriticalSav
 
           <label style={{ display: "block", color: "var(--ink3)", fontSize: 10, fontWeight: 700, marginBottom: 8 }}>
             Dana aktual masuk rekening
-            <input type="number" min="0" inputMode="numeric" value={actualBankAmount} onChange={(event) => setActualBankAmount(event.target.value)} placeholder="Isi dari mutasi bank" style={{ display: "block", width: "100%", marginTop: 4, padding: 9, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }} />
+            <input type="number" min="0" inputMode="numeric" value={actualBankAmount} onChange={(event) => setActualBankAmount(event.target.value)} placeholder="Isi dari mutasi bank; 0 jika full refund" style={{ display: "block", width: "100%", marginTop: 4, padding: 9, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }} />
           </label>
 
           <label style={{ display: "block", color: "var(--ink3)", fontSize: 10, fontWeight: 700, marginBottom: 8 }}>
@@ -239,6 +239,11 @@ export default function TikTokGoSettlementPanel({ s, user, mutate, onCriticalSav
 
           <div style={{ marginTop: 10, padding: 9, borderRadius: 9, background: amountsMatch ? "var(--in-soft)" : "var(--surface2)", fontSize: 11, color: amountsMatch ? "var(--in-text)" : "var(--ink2)" }}>
             <div>Bruto {money(selected.grossAmount, currency)} − potongan {deduction === null ? "—" : money(deduction, currency)} = <b>{expectedNet === null ? "—" : money(expectedNet, currency)}</b></div>
+            {deduction !== null && deduction > selected.grossAmount && (
+              <div style={{ marginTop: 4, color: "var(--out-text)", fontWeight: 800 }}>
+                Potongan tidak boleh lebih besar dari bruto.
+              </div>
+            )}
             {reportDiff !== null && reportDiff !== 0 && (
               <div style={{ marginTop: 4, color: "var(--out-text)", fontWeight: 800 }}>
                 Net laporan TikTok selisih {money(Math.abs(reportDiff), currency)}.
