@@ -139,7 +139,7 @@ export default function TikTokGoSettlementPanel({ s, user, mutate, onCriticalSav
         <div>
           <div style={{ fontSize: 14, fontWeight: 800, color: "var(--ink)" }}>Settlement TikTok Go</div>
           <div style={{ fontSize: 11, lineHeight: 1.45, color: "var(--ink3)", marginTop: 3 }}>
-            Admin cocokkan laporan payout TikTok dengan dana aktual di rekening. Settlement hanya bisa disimpan jika angkanya sama.
+            Admin cocokkan laporan payout TikTok dengan dana aktual di rekening.
           </div>
         </div>
         {summary.pendingCount > 0 && (
@@ -153,7 +153,7 @@ export default function TikTokGoSettlementPanel({ s, user, mutate, onCriticalSav
         <SummaryBox label="Penjualan TikTok Go" value={money(summary.totalSales, currency)} tone="in" />
         <SummaryBox label="Saldo tertahan" value={money(summary.heldBalance, currency)} note="Saldo Dompet TikTok Go" />
         <SummaryBox label="Aktual masuk bank" value={money(summary.totalSettled, currency)} tone="in" />
-        <SummaryBox label="Settlement pending" value={money(summary.pendingSettlement, currency)} note="Sebelum potongan yang belum dicocokkan" />
+        <SummaryBox label="Settlement pending" value={money(summary.pendingSettlement, currency)} note="Sebelum dicocokkan admin" />
         <SummaryBox label="Potongan TikTok" value={money(summary.totalFees, currency)} tone="out" />
       </div>
 
@@ -198,27 +198,27 @@ export default function TikTokGoSettlementPanel({ s, user, mutate, onCriticalSav
         <div style={{ marginTop: 10, padding: 12, borderRadius: 12, border: "1px solid var(--brand)", background: "var(--surface)" }}>
           <div style={{ fontSize: 12, fontWeight: 800, color: "var(--ink)", marginBottom: 3 }}>Cocokkan laporan TikTok Go</div>
           <div style={{ fontSize: 10, color: "var(--ink3)", marginBottom: 10 }}>
-            Bruto dari laporan kasir: <b style={{ color: "var(--ink2)" }}>{money(selected.grossAmount, currency)}</b>
+            Bruto laporan kasir: <b style={{ color: "var(--ink2)" }}>{money(selected.grossAmount, currency)}</b>
           </div>
 
           <label style={{ display: "block", color: "var(--ink3)", fontSize: 10, fontWeight: 700, marginBottom: 8 }}>
-            Tanggal dana masuk / settlement
+            Tanggal settlement
             <input type="date" value={actualDate} max={todayWib()} onChange={(event) => setActualDate(event.target.value)} style={{ display: "block", width: "100%", marginTop: 4, padding: 9, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }} />
           </label>
 
           <label style={{ display: "block", color: "var(--ink3)", fontSize: 10, fontWeight: 700, marginBottom: 8 }}>
-            Total potongan menurut laporan TikTok
+            Total potongan TikTok
             <input type="number" min="0" inputMode="numeric" value={totalDeduction} onChange={(event) => setTotalDeduction(event.target.value)} placeholder="Contoh: 122500" style={{ display: "block", width: "100%", marginTop: 4, padding: 9, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }} />
           </label>
 
           <label style={{ display: "block", color: "var(--ink3)", fontSize: 10, fontWeight: 700, marginBottom: 8 }}>
-            Net menurut laporan TikTok
+            Net menurut TikTok
             <input type="number" min="0" inputMode="numeric" value={reportedNetAmount} onChange={(event) => setReportedNetAmount(event.target.value)} placeholder={expectedNet === null ? "Isi sesuai laporan TikTok" : String(expectedNet)} style={{ display: "block", width: "100%", marginTop: 4, padding: 9, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }} />
           </label>
 
           <label style={{ display: "block", color: "var(--ink3)", fontSize: 10, fontWeight: 700, marginBottom: 8 }}>
-            Dana aktual masuk rekening
-            <input type="number" min="0" inputMode="numeric" value={actualBankAmount} onChange={(event) => setActualBankAmount(event.target.value)} placeholder="Isi dari mutasi bank; 0 jika full refund" style={{ display: "block", width: "100%", marginTop: 4, padding: 9, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }} />
+            Aktual masuk bank
+            <input type="number" min="0" inputMode="numeric" value={actualBankAmount} onChange={(event) => setActualBankAmount(event.target.value)} placeholder="0 jika full refund" style={{ display: "block", width: "100%", marginTop: 4, padding: 9, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }} />
           </label>
 
           <label style={{ display: "block", color: "var(--ink3)", fontSize: 10, fontWeight: 700, marginBottom: 8 }}>
@@ -233,31 +233,23 @@ export default function TikTokGoSettlementPanel({ s, user, mutate, onCriticalSav
           </label>
 
           <label style={{ display: "block", color: "var(--ink3)", fontSize: 10, fontWeight: 700, marginTop: 9 }}>
-            Bukti laporan payout / nomor mutasi
-            <input value={evidenceRef} onChange={(event) => setEvidenceRef(event.target.value)} placeholder="Contoh: payout TikTok / mutasi 8 Sep 2026" style={{ display: "block", width: "100%", marginTop: 4, padding: 9, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }} />
+            Bukti payout / nomor mutasi
+            <input value={evidenceRef} onChange={(event) => setEvidenceRef(event.target.value)} placeholder="Contoh: payout TikTok 8 Sep" style={{ display: "block", width: "100%", marginTop: 4, padding: 9, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }} />
           </label>
 
           <div style={{ marginTop: 10, padding: 9, borderRadius: 9, background: amountsMatch ? "var(--in-soft)" : "var(--surface2)", fontSize: 11, color: amountsMatch ? "var(--in-text)" : "var(--ink2)" }}>
             <div>Bruto {money(selected.grossAmount, currency)} − potongan {deduction === null ? "—" : money(deduction, currency)} = <b>{expectedNet === null ? "—" : money(expectedNet, currency)}</b></div>
             {deduction !== null && deduction > selected.grossAmount && (
-              <div style={{ marginTop: 4, color: "var(--out-text)", fontWeight: 800 }}>
-                Potongan tidak boleh lebih besar dari bruto.
-              </div>
+              <div style={{ marginTop: 4, color: "var(--out-text)", fontWeight: 800 }}>Potongan lebih besar dari bruto.</div>
             )}
             {reportDiff !== null && reportDiff !== 0 && (
-              <div style={{ marginTop: 4, color: "var(--out-text)", fontWeight: 800 }}>
-                Net laporan TikTok selisih {money(Math.abs(reportDiff), currency)}.
-              </div>
+              <div style={{ marginTop: 4, color: "var(--out-text)", fontWeight: 800 }}>Net TikTok selisih {money(Math.abs(reportDiff), currency)}.</div>
             )}
             {bankDiff !== null && bankDiff !== 0 && (
-              <div style={{ marginTop: 4, color: "var(--out-text)", fontWeight: 800 }}>
-                Mutasi bank selisih {money(Math.abs(bankDiff), currency)}. Jangan settle dulu.
-              </div>
+              <div style={{ marginTop: 4, color: "var(--out-text)", fontWeight: 800 }}>Bank selisih {money(Math.abs(bankDiff), currency)}. Jangan settle.</div>
             )}
             {amountsMatch && (
-              <div style={{ marginTop: 4, fontWeight: 800 }}>
-                COCOK ✓ {bankAmount === 0 ? "Full refund, tidak ada dana masuk bank." : `${money(bankAmount, currency)} masuk rekening.`}
-              </div>
+              <div style={{ marginTop: 4, fontWeight: 800 }}>COCOK ✓ {bankAmount === 0 ? "Full refund." : `${money(bankAmount, currency)} masuk bank.`}</div>
             )}
           </div>
 
