@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import { canDo } from "../lib/rbac.js";
 import {
   TIKTOK_GO_DESTINATION_WALLET_ID,
-  TIKTOK_GO_FEE_TYPES,
   applyTikTokGoSettlementMutation,
   buildTikTokGoSettlementMutation,
   computeTikTokGoSummary,
@@ -32,7 +31,11 @@ function shortDate(value) {
   return year && month && day ? `${day}/${month}/${year}` : value;
 }
 
-const emptyFees = () => Object.fromEntries(TIKTOK_GO_FEE_TYPES.map(({ id }) => [id, ""]));
+function parseInput(value) {
+  if (value === "" || value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : null;
+}
 
 function SummaryBox({ label, value, tone = "normal", note }) {
   const color = tone === "in" ? "var(--in-text)" : tone === "out" ? "var(--out-text)" : "var(--ink)";
@@ -55,7 +58,9 @@ export default function TikTokGoSettlementPanel({ s, user, mutate, onCriticalSav
   const [actualDate, setActualDate] = useState(todayWib());
   const [destinationWalletId, setDestinationWalletId] = useState(TIKTOK_GO_DESTINATION_WALLET_ID);
   const [evidenceRef, setEvidenceRef] = useState("");
-  const [fees, setFees] = useState(emptyFees);
+  const [totalDeduction, setTotalDeduction] = useState("");
+  const [reportedNetAmount, setReportedNetAmount] = useState("");
+  const [actualBankAmount, setActualBankAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -69,12 +74,18 @@ export default function TikTokGoSettlementPanel({ s, user, mutate, onCriticalSav
     }
     return rows;
   }, [s?.wallets]);
+
   const selected = summary.rows.find((row) => row.id === selectedId) || null;
-  const feeTotal = TIKTOK_GO_FEE_TYPES.reduce(
-    (sum, { id }) => sum + Math.max(0, Number(fees[id]) || 0),
-    0
-  );
-  const netAmount = Math.max(0, (selected?.grossAmount || 0) - feeTotal);
+  const deduction = parseInput(totalDeduction);
+  const reportedNet = parseInput(reportedNetAmount);
+  const bankAmount = parseInput(actualBankAmount);
+  const expectedNet = selected && deduction !== null
+    ? Math.max(0, selected.grossAmount - deduction)
+    : null;
+  const reportDiff = reportedNet !== null && expectedNet !== null ? reportedNet - expectedNet : null;
+  const bankDiff = bankAmount !== null && reportedNet !== null ? bankAmount - reportedNet : null;
+  const amountFieldsReady = deduction !== null && reportedNet !== null && bankAmount !== null;
+  const amountsMatch = amountFieldsReady && deduction <= (selected?.grossAmount || 0) && reportDiff === 0 && bankDiff === 0;
   const canSettle = canDo(user?.role, "settleTikTokGo");
 
   const openForm = (row) => {
@@ -82,7 +93,9 @@ export default function TikTokGoSettlementPanel({ s, user, mutate, onCriticalSav
     setActualDate(todayWib());
     setDestinationWalletId(row.destinationWalletId || TIKTOK_GO_DESTINATION_WALLET_ID);
     setEvidenceRef("");
-    setFees(emptyFees());
+    setTotalDeduction("");
+    setReportedNetAmount("");
+    setActualBankAmount("");
     setError("");
     setMessage("");
   };
@@ -99,14 +112,20 @@ export default function TikTokGoSettlementPanel({ s, user, mutate, onCriticalSav
         actualSettlementDate: actualDate,
         destinationWalletId,
         evidenceRef,
-        fees,
+        totalDeduction,
+        reportedNetAmount,
+        actualBankAmount,
         user,
         today: todayWib(),
       });
       mutate((doc) => applyTikTokGoSettlementMutation(doc, mutation));
       if (typeof onCriticalSave === "function") await onCriticalSave();
       setSelectedId(null);
-      setMessage(`Settlement ${money(netAmount, currency)} tercatat sebagai transfer, bukan omzet baru.`);
+      setMessage(
+        bankAmount === 0
+          ? "Settlement selesai sebagai full refund. Tidak ada transfer bank baru."
+          : `Settlement ${money(bankAmount, currency)} cocok dan tercatat sebagai transfer, bukan omzet baru.`
+      );
     } catch (cause) {
       setError(cause?.message || "Settlement TikTok Go gagal disimpan.");
     } finally {
@@ -120,7 +139,7 @@ export default function TikTokGoSettlementPanel({ s, user, mutate, onCriticalSav
         <div>
           <div style={{ fontSize: 14, fontWeight: 800, color: "var(--ink)" }}>Settlement TikTok Go</div>
           <div style={{ fontSize: 11, lineHeight: 1.45, color: "var(--ink3)", marginTop: 3 }}>
-            Penjualan diakui saat transaksi. Dana tetap pending sampai bukti masuk bank dikonfirmasi.
+            Admin cocokkan laporan payout TikTok dengan dana aktual di rekening. Settlement hanya bisa disimpan jika angkanya sama.
           </div>
         </div>
         {summary.pendingCount > 0 && (
@@ -133,9 +152,9 @@ export default function TikTokGoSettlementPanel({ s, user, mutate, onCriticalSav
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 7 }}>
         <SummaryBox label="Penjualan TikTok Go" value={money(summary.totalSales, currency)} tone="in" />
         <SummaryBox label="Saldo tertahan" value={money(summary.heldBalance, currency)} note="Saldo Dompet TikTok Go" />
-        <SummaryBox label="Sudah masuk bank" value={money(summary.totalSettled, currency)} tone="in" />
-        <SummaryBox label="Settlement pending" value={money(summary.pendingSettlement, currency)} note="Sebelum potongan yang belum dicatat" />
-        <SummaryBox label="Potongan / fee" value={money(summary.totalFees, currency)} tone="out" />
+        <SummaryBox label="Aktual masuk bank" value={money(summary.totalSettled, currency)} tone="in" />
+        <SummaryBox label="Settlement pending" value={money(summary.pendingSettlement, currency)} note="Sebelum potongan yang belum dicocokkan" />
+        <SummaryBox label="Potongan TikTok" value={money(summary.totalFees, currency)} tone="out" />
       </div>
 
       {message && <div style={{ marginTop: 10, padding: 9, borderRadius: 10, background: "var(--in-soft)", color: "var(--in-text)", fontSize: 11, fontWeight: 700 }}>{message}</div>}
@@ -150,7 +169,7 @@ export default function TikTokGoSettlementPanel({ s, user, mutate, onCriticalSav
                 <div style={{ color: "var(--ink3)", fontSize: 10, marginTop: 2 }}>{row.sale.meta?.outlet || "TikTok Go"}</div>
               </div>
               <span style={{ alignSelf: "flex-start", fontSize: 9, fontWeight: 800, padding: "3px 7px", borderRadius: 99, background: row.status === "settled" ? "var(--in-soft)" : "#FEF3C7", color: row.status === "settled" ? "var(--in-text)" : "#92400E" }}>
-                {row.status === "settled" ? "SETTLED" : "PENDING SETTLEMENT"}
+                {row.status === "settled" ? "COCOK / SELESAI" : "PENDING COCOKKAN"}
               </span>
             </div>
             <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "5px 10px", fontSize: 10, color: "var(--ink3)" }}>
@@ -159,11 +178,11 @@ export default function TikTokGoSettlementPanel({ s, user, mutate, onCriticalSav
               <div>Settlement aktual<br /><b style={{ color: "var(--ink2)" }}>{shortDate(row.actualSettlementDate)}</b></div>
               <div>Rekening tujuan<br /><b style={{ color: "var(--ink2)" }}>{row.destinationLabel}</b></div>
               <div>Potongan<br /><b style={{ color: "var(--out-text)" }}>{money(row.feeTotal, currency)}</b></div>
-              <div>Nilai bersih<br /><b style={{ color: "var(--ink2)" }}>{money(row.netSettlementAmount, currency)}</b></div>
+              <div>Aktual bank<br /><b style={{ color: "var(--ink2)" }}>{row.actualBankAmount === null ? "—" : money(row.actualBankAmount, currency)}</b></div>
             </div>
             {row.status === "pending" && canSettle && selectedId !== row.id && (
               <button type="button" onClick={() => openForm(row)} style={{ width: "100%", marginTop: 9, padding: 9, border: 0, borderRadius: 10, cursor: "pointer", background: "var(--brand)", color: "#fff", fontSize: 11, fontWeight: 800 }}>
-                Konfirmasi dana masuk
+                Cocokkan settlement
               </button>
             )}
           </div>
@@ -177,11 +196,31 @@ export default function TikTokGoSettlementPanel({ s, user, mutate, onCriticalSav
 
       {selected && (
         <div style={{ marginTop: 10, padding: 12, borderRadius: 12, border: "1px solid var(--brand)", background: "var(--surface)" }}>
-          <div style={{ fontSize: 12, fontWeight: 800, color: "var(--ink)", marginBottom: 9 }}>Konfirmasi settlement aktual</div>
+          <div style={{ fontSize: 12, fontWeight: 800, color: "var(--ink)", marginBottom: 3 }}>Cocokkan laporan TikTok Go</div>
+          <div style={{ fontSize: 10, color: "var(--ink3)", marginBottom: 10 }}>
+            Bruto dari laporan kasir: <b style={{ color: "var(--ink2)" }}>{money(selected.grossAmount, currency)}</b>
+          </div>
+
           <label style={{ display: "block", color: "var(--ink3)", fontSize: 10, fontWeight: 700, marginBottom: 8 }}>
-            Tanggal dana masuk
+            Tanggal dana masuk / settlement
             <input type="date" value={actualDate} max={todayWib()} onChange={(event) => setActualDate(event.target.value)} style={{ display: "block", width: "100%", marginTop: 4, padding: 9, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }} />
           </label>
+
+          <label style={{ display: "block", color: "var(--ink3)", fontSize: 10, fontWeight: 700, marginBottom: 8 }}>
+            Total potongan menurut laporan TikTok
+            <input type="number" min="0" inputMode="numeric" value={totalDeduction} onChange={(event) => setTotalDeduction(event.target.value)} placeholder="Contoh: 122500" style={{ display: "block", width: "100%", marginTop: 4, padding: 9, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }} />
+          </label>
+
+          <label style={{ display: "block", color: "var(--ink3)", fontSize: 10, fontWeight: 700, marginBottom: 8 }}>
+            Net menurut laporan TikTok
+            <input type="number" min="0" inputMode="numeric" value={reportedNetAmount} onChange={(event) => setReportedNetAmount(event.target.value)} placeholder={expectedNet === null ? "Isi sesuai laporan TikTok" : String(expectedNet)} style={{ display: "block", width: "100%", marginTop: 4, padding: 9, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }} />
+          </label>
+
+          <label style={{ display: "block", color: "var(--ink3)", fontSize: 10, fontWeight: 700, marginBottom: 8 }}>
+            Dana aktual masuk rekening
+            <input type="number" min="0" inputMode="numeric" value={actualBankAmount} onChange={(event) => setActualBankAmount(event.target.value)} placeholder="Isi dari mutasi bank" style={{ display: "block", width: "100%", marginTop: 4, padding: 9, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }} />
+          </label>
+
           <label style={{ display: "block", color: "var(--ink3)", fontSize: 10, fontWeight: 700, marginBottom: 8 }}>
             Rekening tujuan
             <select value={destinationWalletId} onChange={(event) => setDestinationWalletId(event.target.value)} style={{ display: "block", width: "100%", marginTop: 4, padding: 9, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }}>
@@ -192,25 +231,34 @@ export default function TikTokGoSettlementPanel({ s, user, mutate, onCriticalSav
               ))}
             </select>
           </label>
-          <div style={{ color: "var(--ink3)", fontSize: 10, fontWeight: 700, marginBottom: 5 }}>Potongan TikTok Go</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
-            {TIKTOK_GO_FEE_TYPES.map(({ id, label }) => (
-              <label key={id} style={{ color: "var(--ink3)", fontSize: 9, fontWeight: 700 }}>
-                {label}
-                <input type="number" min="0" inputMode="numeric" value={fees[id]} onChange={(event) => setFees((previous) => ({ ...previous, [id]: event.target.value }))} placeholder="0" style={{ display: "block", width: "100%", marginTop: 3, padding: 8, borderRadius: 8, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }} />
-              </label>
-            ))}
-          </div>
+
           <label style={{ display: "block", color: "var(--ink3)", fontSize: 10, fontWeight: 700, marginTop: 9 }}>
-            Bukti / nomor mutasi bank
-            <input value={evidenceRef} onChange={(event) => setEvidenceRef(event.target.value)} placeholder="Wajib diisi, contoh: mutasi 8 Sep 2026" style={{ display: "block", width: "100%", marginTop: 4, padding: 9, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }} />
+            Bukti laporan payout / nomor mutasi
+            <input value={evidenceRef} onChange={(event) => setEvidenceRef(event.target.value)} placeholder="Contoh: payout TikTok / mutasi 8 Sep 2026" style={{ display: "block", width: "100%", marginTop: 4, padding: 9, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }} />
           </label>
-          <div style={{ marginTop: 10, padding: 9, borderRadius: 9, background: "var(--surface2)", fontSize: 11, color: "var(--ink2)" }}>
-            Bruto {money(selected.grossAmount, currency)} − potongan {money(feeTotal, currency)} = <b>{money(netAmount, currency)}</b> masuk bank.
+
+          <div style={{ marginTop: 10, padding: 9, borderRadius: 9, background: amountsMatch ? "var(--in-soft)" : "var(--surface2)", fontSize: 11, color: amountsMatch ? "var(--in-text)" : "var(--ink2)" }}>
+            <div>Bruto {money(selected.grossAmount, currency)} − potongan {deduction === null ? "—" : money(deduction, currency)} = <b>{expectedNet === null ? "—" : money(expectedNet, currency)}</b></div>
+            {reportDiff !== null && reportDiff !== 0 && (
+              <div style={{ marginTop: 4, color: "var(--out-text)", fontWeight: 800 }}>
+                Net laporan TikTok selisih {money(Math.abs(reportDiff), currency)}.
+              </div>
+            )}
+            {bankDiff !== null && bankDiff !== 0 && (
+              <div style={{ marginTop: 4, color: "var(--out-text)", fontWeight: 800 }}>
+                Mutasi bank selisih {money(Math.abs(bankDiff), currency)}. Jangan settle dulu.
+              </div>
+            )}
+            {amountsMatch && (
+              <div style={{ marginTop: 4, fontWeight: 800 }}>
+                COCOK ✓ {bankAmount === 0 ? "Full refund, tidak ada dana masuk bank." : `${money(bankAmount, currency)} masuk rekening.`}
+              </div>
+            )}
           </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, marginTop: 9 }}>
             <button type="button" disabled={busy} onClick={() => setSelectedId(null)} style={{ padding: 9, borderRadius: 9, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink2)", fontWeight: 700, cursor: "pointer" }}>Batal</button>
-            <button type="button" disabled={busy} onClick={confirmSettlement} style={{ padding: 9, borderRadius: 9, border: 0, background: busy ? "var(--ink3)" : "var(--brand)", color: "#fff", fontWeight: 800, cursor: busy ? "wait" : "pointer" }}>{busy ? "Menyimpan…" : "Catat transfer"}</button>
+            <button type="button" disabled={busy || !amountsMatch || !evidenceRef.trim()} onClick={confirmSettlement} style={{ padding: 9, borderRadius: 9, border: 0, background: busy || !amountsMatch || !evidenceRef.trim() ? "var(--ink3)" : "var(--brand)", color: "#fff", fontWeight: 800, cursor: busy ? "wait" : (!amountsMatch || !evidenceRef.trim() ? "not-allowed" : "pointer") }}>{busy ? "Menyimpan…" : "Cocok & settlement"}</button>
           </div>
         </div>
       )}
