@@ -12,6 +12,7 @@
     "test:transfer": "node lib/transactionNormalize.transferRetry.test.mjs",
     "audit:ksm-smt": "node scripts/auditKsmSmtAug2026.mjs",
     "audit:samtaro-dup": "node scripts/auditSamtaroDuplicates.mjs",
+    "cleanup:samtaro-dup:dry-run": "node scripts/cleanupSamtaroDuplicatesDryRun.mjs",
     "audit:report-sync": "node scripts/auditReportSync.mjs",
     "audit:duplicates": "node scripts/auditDailyReportDuplicates.mjs",
     "import:purchasing": "node scripts/importPurchasingExcel.mjs",
