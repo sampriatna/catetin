@@ -6,6 +6,16 @@ const commitSha =
   || "dev";
 
 const nextConfig = {
+  async rewrites() {
+    const projectUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!projectUrl) return [];
+    const origin = new URL(projectUrl).origin;
+    // Fixed destination only; never accept a user-provided upstream URL.
+    return ["auth", "rest", "storage"].map((service) => ({
+      source: `/api/supabase/${service}/v1/:path*`,
+      destination: `${origin}/${service}/v1/:path*`,
+    }));
+  },
   transpilePackages: ["lucide-react"],
   compress: true,
   experimental: {
