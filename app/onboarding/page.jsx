@@ -51,6 +51,13 @@ export default function OnboardingPage() {
       setUserEmail(sess.user.email || "");
 
       try {
+        // Existing members must not depend on the optional invitation service.
+        const existing = await listMyBusinesses();
+        if (existing.length) {
+          window.location.href = `/dashboard?biz=${pickDefaultBusinessId(existing)}`;
+          return;
+        }
+
         const claimed = await claimPendingInvites();
         if (claimed?.length) {
           window.location.href = `/dashboard?biz=${claimed[0].business_id}`;

@@ -43,9 +43,13 @@ export default function BusinessProvider({ children }) {
   const [authUser, setAuthUser] = useState(null);
   const [members, setMembers] = useState([]);
   const [error, setError] = useState(null);
+  const [retryCount, setRetryCount] = useState(0);
 
   const mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; }, []);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   // ── 1. Auth: localStorage bootstrap + onAuthStateChange (NO getSession) ────
   useEffect(() => {
@@ -87,6 +91,7 @@ export default function BusinessProvider({ children }) {
   useEffect(() => {
     if (!authReady) return;
     if (!session) {
+      setError(null);
       setBusinesses([]);
       setBizId(null);
       setAuthUser(null);
@@ -99,6 +104,7 @@ export default function BusinessProvider({ children }) {
     const onOnboarding = pathname === "/onboarding";
 
     let alive = true;
+    setError(null);
     setBizLoaded(false);
 
     (async () => {
@@ -122,15 +128,6 @@ export default function BusinessProvider({ children }) {
       };
 
       try {
-        try {
-          const claimed = await repo.claimPendingInvites();
-          if (claimed?.length) {
-            localStorage.setItem(LAST_BIZ, claimed[0].business_id);
-          }
-        } catch {
-          /* RPC belum di Supabase — lanjut tanpa klaim */
-        }
-
         let list = await fetchMemberships();
 
         if (list.length === 0) {
@@ -140,8 +137,9 @@ export default function BusinessProvider({ children }) {
               localStorage.setItem(LAST_BIZ, claimed[0].business_id);
               list = await fetchMemberships();
             }
-          } catch {
-            /* abaikan */
+          } catch (claimError) {
+            // A failed claim is not proof that this user has no business.
+            throw claimError;
           }
         }
 
@@ -219,11 +217,11 @@ export default function BusinessProvider({ children }) {
     })();
 
     return () => { alive = false; };
-  }, [authReady, session?.user?.id, bizParam, pathname]);
+  }, [authReady, session?.user?.id, bizParam, pathname, retryCount]);
 
   // ── 3. Redirect ───────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!authReady || !bizLoaded) return;
+    if (!authReady || !bizLoaded || error) return;
     if (session && pathname === "/login" && !inviteParam) {
       router.replace("/dashboard");
       return;
@@ -237,7 +235,7 @@ export default function BusinessProvider({ children }) {
     if (session && businesses.length === 0 && pathname !== "/onboarding" && !isPublic(pathname)) {
       router.replace("/onboarding");
     }
-  }, [authReady, bizLoaded, session, businesses.length, pathname, router, inviteParam, bizParam]);
+  }, [authReady, bizLoaded, session, businesses.length, pathname, router, inviteParam, bizParam, error]);
 
   const signOut = useCallback(async () => {
     resetSupabaseSessionCache();
@@ -301,7 +299,7 @@ export default function BusinessProvider({ children }) {
         <div style={{ color: "#B91C1C", maxWidth: 360, textAlign: "center" }}>
           <div style={{ fontWeight: 800, marginBottom: 8 }}>Gagal memuat</div>
           <div style={{ fontSize: 13, marginBottom: 16 }}>{error}</div>
-          <button onClick={() => { setError(null); setBizLoaded(false); }} style={btn}>Coba lagi</button>
+          <button onClick={() => { setError(null); setBizLoaded(false); setRetryCount((n) => n + 1); }} style={btn}>Coba lagi</button>
         </div>
       </Gate>
     );
