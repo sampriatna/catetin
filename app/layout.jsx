@@ -1,6 +1,7 @@
 // app/layout.jsx
 import { Suspense } from "react";
 import BusinessProvider from "../components/layout/BusinessProvider";
+import SwRegister from "../components/SwRegister";
 
 export const metadata = {
   title: "NF3",
@@ -31,6 +32,7 @@ export default function RootLayout({ children }) {
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
       </head>
       <body style={{ margin: 0, fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif" }}>
+        <SwRegister />
         <Suspense>
           <BusinessProvider>{children}</BusinessProvider>
         </Suspense>
