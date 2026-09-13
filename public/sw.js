@@ -1,5 +1,5 @@
 /* NF3 service worker — bump APP_SW_VERSION / SW_VERSION tiap patch kritis */
-const SW_VERSION = "nf3-sw-20260913-invite-recovery";
+const SW_VERSION = "nf3-sw-20260913-login-transport";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());

@@ -254,6 +254,7 @@ export default function LoginPage() {
 }
 
 function translateError(m = "") {
+  if (/load failed|failed to fetch|networkerror|network request failed/i.test(m)) return "Koneksi ke layanan login terputus. Coba masuk lagi. Jika tetap gagal, coba ganti Wi-Fi ke data seluler.";
   if (/timeout/i.test(m)) return "Login terlalu lama. Refresh halaman (Ctrl+Shift+R), lalu coba lagi.";
   if (/invalid login credentials/i.test(m)) return "Email atau password salah. Coba lagi atau pakai Lupa password.";
   if (/already registered/i.test(m)) return "Email sudah terdaftar. Silakan masuk atau reset password.";
