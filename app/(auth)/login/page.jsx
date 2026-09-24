@@ -5,7 +5,7 @@
 import { Suspense, useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../../lib/supabaseClient";
-import { acceptInvite, claimPendingInvites } from "../../../lib/repo";
+import { acceptInvite } from "../../../lib/repo";
 import { resetPasswordRedirectUrl, redirectRecoveryTokensIfPresent } from "../../../lib/resetPasswordPage.jsx";
 import { withTimeout } from "../../../lib/supabaseSession";
 import { readStoredSession } from "../../../lib/authBootstrap";
@@ -71,16 +71,12 @@ function LoginInner() {
   async function afterAuth() {
     if (inviteToken) {
       await handleAcceptInvite();
-    } else {
-      try {
-        const claimed = await claimPendingInvites();
-        if (claimed?.length) {
-          window.location.replace(`/dashboard?biz=${claimed[0].business_id}`);
-          return;
-        }
-      } catch { /* RPC belum ada di Supabase */ }
-      window.location.replace("/dashboard");
+      return;
     }
+    // BusinessProvider already checks memberships and only claims pending invites
+    // when the user genuinely has no active business. Avoid doing that work twice
+    // on every normal login.
+    window.location.replace("/dashboard");
   }
 
   async function submit(e) {
