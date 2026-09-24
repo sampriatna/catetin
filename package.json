@@ -10,6 +10,7 @@
     "test:sdm": "node lib/sdmHarian.test.mjs",
     "test:laporan": "node lib/laporanKeuangan.test.mjs",
     "test:transfer": "node lib/transactionNormalize.transferRetry.test.mjs",
+    "test:transport": "node --test lib/supabaseTransport.test.mjs",
     "audit:ksm-smt": "node scripts/auditKsmSmtAug2026.mjs",
     "audit:samtaro-dup": "node scripts/auditSamtaroDuplicates.mjs",
     "audit:report-sync": "node scripts/auditReportSync.mjs",
