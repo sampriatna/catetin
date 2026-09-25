@@ -546,7 +546,7 @@ function StepForm({ s, draft, setDraft, onNext, onClose }) {
                 <div style={styles.uploadBox} onClick={() => fileRef.current?.click()}>
                   <span style={{ fontSize: 22, color: "#bbb" }}>📷</span>
                   <span style={{ fontSize: 12, color: "#aaa", marginTop: 4 }}>Tap untuk foto atau pilih dari galeri</span>
-                  <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={handleFile} />
+                  <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFile} />
                 </div>
               )
             }
