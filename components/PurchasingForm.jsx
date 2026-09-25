@@ -26,25 +26,29 @@ import { walletOptionLabel } from "../lib/walletDisplay";
 import { todayLocal } from "../lib/laporanKeuangan";
 import { aiParse } from "../lib/appState";
 import { supabase } from "../lib/supabaseClient";
+import { withTimeout } from "../lib/supabaseSession";
+import { compressReceiptImage } from "../lib/receiptImage";
 
 // ------------------------------------------------------------
 // Helper: upload struk ke Supabase Storage
 // ------------------------------------------------------------
+// Melempar error jika gagal — pemanggil wajib memberi tahu staf (jangan diam-diam).
 async function uploadReceipt(file, businessId) {
   if (!file) return null;
-  try {
-    const ext      = file.name.split(".").pop();
-    const path     = `${businessId}/${Date.now()}.${ext}`;
-    const { data, error } = await supabase.storage
+  const upload = await compressReceiptImage(file);
+  const ext      = (upload.name || "").split(".").pop() || "jpg";
+  const path     = `${businessId}/${Date.now()}.${ext}`;
+  const { data, error } = await withTimeout(
+    supabase.storage
       .from("receipts")
-      .upload(path, file, { upsert: false });
-    if (error) { console.warn("[PurchasingForm] upload struk gagal:", error.message); return null; }
-    const { data: urlData } = supabase.storage.from("receipts").getPublicUrl(data.path);
-    return urlData?.publicUrl || null;
-  } catch (e) {
-    console.warn("[PurchasingForm] upload error:", e);
-    return null;
-  }
+      .upload(path, upload, { upsert: false, contentType: upload.type || undefined }),
+    30000,
+    "Upload struk"
+  );
+  if (error) throw new Error(error.message || "Upload struk gagal");
+  const { data: urlData } = supabase.storage.from("receipts").getPublicUrl(data.path);
+  if (!urlData?.publicUrl) throw new Error("Link struk tidak didapat");
+  return urlData.publicUrl;
 }
 
 // ------------------------------------------------------------
@@ -609,7 +613,20 @@ function StepReview({ s, draft, onSave, onBack, onClose, onNew }) {
       // Upload struk dulu kalau ada
       let receiptUrl = null;
       if (draft.receiptFile) {
-        receiptUrl = await uploadReceipt(draft.receiptFile, s.business?.id);
+        try {
+          receiptUrl = await uploadReceipt(draft.receiptFile, s.business?.id);
+        } catch (uploadErr) {
+          console.warn("[PurchasingForm] upload struk gagal:", uploadErr);
+          const reason = uploadErr?.message || String(uploadErr);
+          const saveWithout = window.confirm(
+            `Foto struk GAGAL terupload (${reason}).\n\n`
+            + "OK = simpan transaksi TANPA struk.\n"
+            + "Batal = jangan simpan dulu, coba lagi."
+          );
+          if (!saveWithout) {
+            throw new Error(`Foto struk gagal terupload (${reason}). Transaksi belum disimpan — tap Simpan untuk coba lagi.`);
+          }
+        }
       }
 
       // Normalisasi items — buang baris kosong
