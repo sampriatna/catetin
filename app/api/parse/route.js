@@ -4,6 +4,11 @@
 
 const MODEL = "claude-sonnet-4-6";
 
+// Baca foto nota berisi banyak item bisa >10 detik.
+export const maxDuration = 60;
+
+const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
 async function callClaude(body) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -59,6 +64,30 @@ Kata kunci pengeluaran: beli/bayar/kulakan/gaji/modal keluar/bayar/pengeluaran.
 Balas HANYA JSON tanpa markdown: {"type":"in"|"out","category":"<nama persis dari daftar>","amount":<angka bulat>,"desc":"<ringkas>"}
 
 Kalimat: "${text}"`,
+        }],
+      });
+      return Response.json(result);
+    }
+
+    if (mode === "purchasing_receipt") {
+      if (!image || !IMAGE_TYPES.has(media)) {
+        return Response.json({ error: "Format foto tidak didukung. Pakai JPG/PNG atau screenshot." }, { status: 400 });
+      }
+      const result = await callClaude({
+        model: MODEL, max_tokens: 4000,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: media, data: image } },
+            { type: "text", text: `Gambar ini berisi catatan BELANJA purchasing resto Indonesia: bisa foto struk/nota toko, atau screenshot pesan WhatsApp daftar pengeluaran.
+Ambil SEMUA baris barang yang dibeli, urut sesuai gambar. Angka di tiap baris adalah HARGA TOTAL baris itu (bukan harga satuan).
+Format angka Indonesia: titik = pemisah ribuan (1.296.000 = 1296000, 12.500 = 12500).
+Qty & satuan ada di depan nama, contoh "6dus Fresh milk" = qty 6 unit dus; "10lbr kertas roti" = qty 10 unit lbr; "1ikt" = 1 ikat. Tanpa qty (mis. "Bensin Disel 20.000") = qty 1 unit "pcs".
+JANGAN masukkan sebagai item: baris total, kas kecil, saku, sisa, saldo, kembalian, tanggal, nama pengirim.
+Kelompok akuntansi (pilih SATU yang paling cocok untuk mayoritas belanja, nama persis): ${catList}.
+Balas HANYA JSON tanpa markdown:
+{"category":"<kelompok dari daftar>","supplier":"<nama toko/pasar jika tertulis, else kosong>","date":"YYYY-MM-DD persis seperti tertulis, else kosong","writtenTotal":<angka total yang tertulis di gambar, else 0>,"items":[{"name":"<nama barang>","qty":<angka>,"unit":"<satuan>","subtotal":<harga total baris, bulat>}],"desc":"<ringkas, mis. Belanja harian 23/09>"}` },
+          ],
         }],
       });
       return Response.json(result);

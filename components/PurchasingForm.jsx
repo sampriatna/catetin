@@ -17,7 +17,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo } from "react";
-import { Mic, Loader2, Sparkles } from "lucide-react";
+import { Mic, Loader2, Sparkles, ScanLine } from "lucide-react";
 import { visibleWallets, visibleCategories } from "../lib/rbac";
 import { addPurchasingExpense, PURCHASING_OUTLETS, formatRupiah, checkPurchasingFloor, purchasingOutletOptions } from "../lib/purchasingExpense";
 import { ensurePurchasingCategories } from "../lib/purchasingCategories";
@@ -28,6 +28,7 @@ import { aiParse } from "../lib/appState";
 import { supabase } from "../lib/supabaseClient";
 import { withTimeout } from "../lib/supabaseSession";
 import { compressReceiptImage } from "../lib/receiptImage";
+import { scanResultToItems, scanResultDate } from "../lib/purchasingScan";
 
 // ------------------------------------------------------------
 // Helper: upload struk ke Supabase Storage
@@ -194,6 +195,10 @@ function StepForm({ s, draft, setDraft, onNext, onClose }) {
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [listening, setListening] = useState(false);
   const [voiceErr, setVoiceErr] = useState("");
+  const scanRef   = useRef(null);
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanErr, setScanErr] = useState("");
+  const [scanInfo, setScanInfo] = useState(null);
 
   const today = todayLocal();
 
@@ -230,6 +235,59 @@ function StepForm({ s, draft, setDraft, onNext, onClose }) {
       setVoiceErr("Gagal memahami suara. Coba lagi atau isi manual.");
     } finally {
       setVoiceBusy(false);
+    }
+  }
+
+  // Scan nota / screenshot WA → AI isi item, total, tanggal. Staf tetap cek sebelum simpan.
+  async function applyScanFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setScanErr("");
+    setScanInfo(null);
+    setScanBusy(true);
+    try {
+      const img = await compressReceiptImage(file);
+      if (!/^image\/(jpeg|png|webp|gif)$/.test(img.type || "")) {
+        throw new Error("Format foto ini belum bisa dibaca. Screenshot fotonya, lalu pilih screenshot itu.");
+      }
+      if (img.size > 3_500_000) {
+        throw new Error("Foto terlalu besar. Coba screenshot atau foto ulang lebih dekat.");
+      }
+      const b64 = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(",")[1]);
+        r.onerror = () => reject(new Error("Foto tidak bisa dibaca dari HP."));
+        r.readAsDataURL(img);
+      });
+      let r;
+      try {
+        r = await aiParse({ mode: "purchasing_receipt", image: b64, media: img.type, categories: cats });
+      } catch (err) {
+        throw new Error(`AI gagal membaca nota (${err?.message || "koneksi"}). Coba lagi atau isi manual.`);
+      }
+      const parsed = scanResultToItems(r);
+      if (!parsed.items.length) {
+        throw new Error("Tidak ada barang yang terbaca. Pastikan foto jelas & tidak terpotong.");
+      }
+      const cat = cats.find(c => c.name.toLowerCase() === (r.category || "").toLowerCase());
+      const date = scanResultDate(r);
+      setDraft(d => ({
+        ...d,
+        items: parsed.items,
+        amount: parsed.itemsTotal || parsed.writtenTotal || d.amount,
+        categoryId: cat?.id || d.categoryId,
+        supplier: r.supplier || d.supplier,
+        date: date || d.date,
+        desc: d.desc || r.desc || "",
+        receiptFile: img,
+      }));
+      setPreview(URL.createObjectURL(img));
+      setScanInfo({ ...parsed, date });
+    } catch (err) {
+      setScanErr(err?.message || "Gagal membaca nota. Coba lagi atau isi manual.");
+    } finally {
+      setScanBusy(false);
     }
   }
 
@@ -330,7 +388,7 @@ function StepForm({ s, draft, setDraft, onNext, onClose }) {
             </div>
           )}
 
-          {/* Input suara — purchasing pakai bicara, bukan scan AI nota */}
+          {/* Isi otomatis — bicara/ketik atau scan nota / screenshot WA */}
           <div style={{ ...styles.card, marginBottom: 14, background: "#F5F3FF", border: "1px solid #C7D2FE" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
               <Sparkles size={18} color="#6366F1" />
@@ -375,6 +433,44 @@ function StepForm({ s, draft, setDraft, onNext, onClose }) {
             />
             {voiceErr && (
               <div style={{ marginTop: 8, fontSize: 12, color: "#B91C1C" }}>{voiceErr}</div>
+            )}
+            <button
+              type="button"
+              onClick={() => scanRef.current?.click()}
+              disabled={scanBusy}
+              style={{
+                width: "100%",
+                marginTop: 10,
+                padding: "12px 16px",
+                borderRadius: 12,
+                border: "1px solid #6366F1",
+                background: "#fff",
+                color: "#4F46E5",
+                fontWeight: 700,
+                fontSize: 14,
+                cursor: scanBusy ? "wait" : "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                opacity: scanBusy ? 0.75 : 1,
+              }}
+            >
+              {scanBusy ? <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> : <ScanLine size={18} />}
+              {scanBusy ? "Membaca nota…" : "Scan nota / screenshot WA"}
+            </button>
+            <input ref={scanRef} type="file" accept="image/*" style={{ display: "none" }} onChange={applyScanFile} />
+            {scanErr && (
+              <div style={{ marginTop: 8, fontSize: 12, color: "#B91C1C" }}>{scanErr}</div>
+            )}
+            {scanInfo && (
+              <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.5, color: scanInfo.totalMismatch || scanInfo.missingPrice ? "#92400E" : "#065F46" }}>
+                {scanInfo.items.length} barang terbaca · total {formatRupiah(scanInfo.itemsTotal)}.
+                {scanInfo.totalMismatch && ` Total tertulis di nota ${formatRupiah(scanInfo.writtenTotal)} — beda, cek item.`}
+                {scanInfo.missingPrice > 0 && ` ${scanInfo.missingPrice} barang belum ada harga.`}
+                {scanInfo.date && ` Tanggal diisi dari nota (${scanInfo.date}) — cek lagi.`}
+                {" "}Pilih Kategori, Sumber dana & isi Beli dari sebelum lanjut.
+              </div>
             )}
           </div>
 
@@ -534,7 +630,7 @@ function StepForm({ s, draft, setDraft, onNext, onClose }) {
           <div style={styles.fieldGroup}>
             <label style={styles.label}>
               Lampiran struk{" "}
-              <span style={{ color: "#aaa", fontWeight: 400 }}>(opsional, arsip — bukan scan AI)</span>
+              <span style={{ color: "#aaa", fontWeight: 400 }}>(opsional, arsip — otomatis terisi jika pakai scan)</span>
             </label>
             {preview
               ? (

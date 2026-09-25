@@ -136,6 +136,7 @@ import { isPurchasingTx } from "../../../lib/purchasingExpense";
 import { purchasingTxTitle, purchasingTxSubtitle } from "../../../lib/purchasingItems";
 import { showActionToast } from "../../../lib/actionToast";
 import { subscribeAppStateChanges } from "../../../lib/appStateRealtime.js";
+import { compressReceiptImage } from "../../../lib/receiptImage";
 import { applyBalanceAdjustment, computeBalanceAdjustment, recentBalanceAdjustments, countBalanceAdjustments } from "../../../lib/adjustSaldo";
 import { playRevisionAlertSound, playNotificationPing, unlockNotificationAudio } from "../../../lib/notificationSound";
 import ActionToast from "../../../components/ActionToast";
@@ -3094,8 +3095,10 @@ function CatatTransaksi({ s, bizId, mutate, onSave, onNotify, onClose, business,
     }
     setBusy(true); setErr("");
     try {
-      const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.onerror = rej; r.readAsDataURL(f); });
-      const r = await aiParseReceipt(b64, f.type, s.categories);
+      // Foto galeri bisa 3–8 MB — kecilkan dulu agar tidak ditolak server.
+      const img = await compressReceiptImage(f);
+      const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.onerror = rej; r.readAsDataURL(img); });
+      const r = await aiParseReceipt(b64, img.type, s.categories);
       const txType = expenseOnly ? "out" : (r.type || "out");
       const cats = visibleCategoriesForBusiness(s.categories, s.currentUser, txType, business);
       const cat = cats.find(c => c.name.toLowerCase() === (r.category || "").toLowerCase()) || cats[0];
@@ -3194,7 +3197,7 @@ function CatatTransaksi({ s, bizId, mutate, onSave, onNotify, onClose, business,
                 : "Claude akan baca total, merchant, dan tanggal."}
             </div>
             <label style={{ display: "inline-block", padding: "11px 24px", borderRadius: 99, background: scanFull ? "var(--line)" : "var(--brand)", color: scanFull ? "var(--ink3)" : "#fff", fontWeight: 700, cursor: scanFull ? "not-allowed" : "pointer", fontSize: 14, opacity: scanFull ? 0.7 : 1 }}>
-              Pilih gambar<input type="file" accept="image/*" capture="environment" disabled={scanFull} style={{ display: "none" }} onChange={onPhoto} />
+              Pilih gambar<input type="file" accept="image/*" disabled={scanFull} style={{ display: "none" }} onChange={onPhoto} />
             </label>
           </Card>
         )}
