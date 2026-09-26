@@ -1,67 +1,68 @@
-# DRAFT Inventory SQL — Review (revisi setelah PR #3 CHANGES REQUESTED)
+# DRAFT Inventory SQL — Review putaran 4 (blocker PR #4)
 
-**STATUS: DRAFT — JANGAN DIJALANKAN / JANGAN DIGABUNG**
+**STATUS: DRAFT — JANGAN DIJALANKAN / JANGAN DIGABUNG SEBAGAI MIGRATION**
 
-Lokasi sementara (bukan `supabase/migrations/`):
+> Catatan: PR #3 sudah ter-merge ke `main` (hanya file draft di git).  
+> Merge itu **tidak** menjalankan SQL. Revisi blocker ini tetap di PR #4.  
+> **Belum ada file yang di-approve untuk dieksekusi. Jangan merge sampai review.**
+
+Lokasi tetap:
 
 ```
 supabase/drafts/inventory_fase2/
 ```
 
-Setelah final & disetujui per file, baru dibuat migration timestamp resmi satu per satu di `supabase/migrations/`.
+Migration timestamp resmi di `supabase/migrations/` **belum** dibuat.
 
 ## Urutan file
 
-| # | File |
-|---|---|
-| 01 | `01_roles_and_member_assignments.sql` |
-| 02 | `02_inventory_master.sql` |
-| 03 | `03_stock_ledger.sql` |
-| 04 | `04_opname_transfers_waste.sql` |
-| 05 | `05_requests_purchasing_links.sql` |
-| 06 | `06_rls_and_quantity_rpcs.sql` |
-| 07 | `07_domain_rpcs.sql` |
-| 08 | `08_invite_claim_transactional.sql` |
-| 99 | `99_ROLLBACK_ALL.sql` |
-| — | `SECURITY_TEST_PLAN.md` |
-| — | `SCHEMA_SUMMARY.md` |
+| # | File | Status review |
+|---|---|---|
+| 01 | `01_roles_and_member_assignments.sql` | **GATE cutover invite** — lihat `INVITE_CUTOVER.md` |
+| 02 | `02_inventory_master.sql` | dependensi cutover invite (`01→02→08`) |
+| 03 | `03_stock_ledger.sql` | revisi blocker |
+| 04 | `04_opname_transfers_waste.sql` | revisi |
+| 05 | `05_requests_purchasing_links.sql` | revisi blocker |
+| 06 | `06_rls_and_quantity_rpcs.sql` | revisi blocker |
+| 07 | `07_domain_rpcs.sql` | revisi blocker utama |
+| 08 | `08_invite_claim_transactional.sql` | **GATE cutover invite** — lihat `INVITE_CUTOVER.md` |
+| 99 | `99_ROLLBACK_ALL.sql` | revisi blocker |
 
-Setiap file final memakai `BEGIN` … preflight … DDL … `COMMIT`.
+## Gate cutover invite (blocker)
 
-## Keputusan bisnis final (terkunci)
+Urutan benar (ringkas): role inventory belum di UI legacy → staging
+`01 → 02 → 08` (RPC legacy tetap utuh) → smoke legacy → baru deploy app v2
+(feature flag) → smoke v2 → enable role inventory → production controlled cutover.
 
-| Topik | Keputusan |
-|---|---|
-| `po_required_min_amount_idr` | `NULL` awal; PO wajib by proses formal/tempo/quotation, bukan nominal otomatis |
-| Lokasi | 1 inventory location per outlet; Dapur/Bar = area, bukan sub-location |
-| Permissions | `text[]` + CHECK subset daftar resmi |
-| Kasir + receive | **Tidak** otomatis `receive_stock` |
-| QR host | Dari config/env; production: `catatin.nusafishing.com` |
-| Draft archive | 30 hari; purge 90 hari jika belum posted & tidak direferensikan |
-| Admin purchasing link | **Hanya review/approve**, bukan create/ganti PR-PO |
-| Negative stock | Diblok setelah go-live bisnis |
-| Opening produksi | **Tidak** ada di PR ini |
+RPC legacy **tidak diganti** di draft ini. Rencana lengkap + rollback/stop:
+[`INVITE_CUTOVER.md`](./INVITE_CUTOVER.md).
 
-## Perubahan besar vs draft sebelumnya
+## Keputusan bisnis terkunci (ringkas)
 
-1. Folder keluar dari `migrations/`.
-2. Semua `SECURITY DEFINER` di-revoke dari PUBLIC/anon/authenticated; hanya domain RPC di-grant.
-3. Ledger tidak bisa ditulis client; posting hanya lewat RPC domain.
-4. Transfer: 1 movement per kaki (`from`→`to`); partial receive lewat `stock_transfer_receipts`.
-5. Integritas lintas-tabel satu bisnis (composite FK / trigger).
-6. Cost tidak bocor (tidak ada SELECT outlet ke tabel ber-cost).
-7. `app_tx_id text` + `source_system` (kompatibel `imp_<hash>`).
-8. Master `suppliers`, `units`, `item_unit_conversions`.
-9. Opname hitung server-side; go-live level bisnis.
-10. Rollback aman dengan preflight stop-before-DROP.
+- `po_required_min_amount_idr = NULL`; PO by proses formal
+- 1 location / outlet; Dapur/Bar = area
+- Kasir **tanpa** `receive_stock` otomatis
+- Admin **hanya** review purchasing link (RPC), bukan create/ganti PR-PO
+- Purchasing **tidak** self-approve
+- Negative stock diblok setelah go-live
+- Opening produksi tidak dijalankan di draft ini
+- QR host dari env; production `catatin.nusafishing.com`
+- Draft archive 30 hari / purge 90 hari
 
-## File aplikasi (nanti, belum diubah)
+## Arsitektur write path
 
-`lib/membershipResolve.js`, `BusinessProvider.jsx`, `lib/repo.js`, `lib/rbac.js`, `lib/accountUi.js`, `lib/businessFeatures.js`, invite pages/API, `PurchasingForm.jsx`, `lib/purchasingExpense.js`, `lib/shareWa.js`, `NF3App.jsx`, plus modul baru `lib/inventory/*` & `app/(app)/inventory/*`.
+```
+Client → domain RPC (auth + assignment + permission) → tabel
+```
 
-## Larangan operator
+Bukan client write bebas, bukan service-role tanpa cek user.
 
-- Jangan jalankan SQL di folder ini sebelum approve per file.
-- Jangan seed lokasi/item ke produksi dari contoh.
-- Jangan hapus `app_state` / data legacy.
-- Jangan ubah `.env`.
+## Larangan
+
+- Jangan jalankan SQL folder ini sebelum approve per file.
+- Jangan deploy app yang memanggil v2 sebelum `01 → 02 → 08` ada di target.
+- Ikuti `INVITE_CUTOVER.md`; STOP + rollback jika smoke legacy gagal setelah apply SQL.
+- Jangan `CREATE OR REPLACE` / drop `accept_invite` / `claim_pending_invites` lama.
+- Jangan buat migration timestamp sebelum approve.
+- Jangan ubah `.env` / hapus data legacy.
+- Jangan ubah file aplikasi lama, `app_state`, wallets, transactions, RPC login lama, atau policy legacy di revisi draft ini.
