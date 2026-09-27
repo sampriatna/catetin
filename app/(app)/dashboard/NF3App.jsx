@@ -1878,6 +1878,14 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
               optional: true,
               onClick: () => { window.location.href = "/dapur"; },
             });
+            tasks.push({
+              id: "kirimstok",
+              title: "Permintaan & Terima Stok",
+              subtitle: "Minta barang ke gudang, cek & terima kiriman yang datang",
+              done: false,
+              optional: true,
+              onClick: () => { window.location.href = "/dapur?tab=kirim"; },
+            });
           }
           if (kasirSosmed) {
             tasks.push({
@@ -1926,6 +1934,13 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
               done: false,
               optional: true,
               onClick: () => { window.location.href = "/dapur"; },
+            }, {
+              id: "kirimstok",
+              title: "Kirim Stok ke Outlet",
+              subtitle: "Proses permintaan outlet, catat kiriman gudang → outlet",
+              done: false,
+              optional: true,
+              onClick: () => { window.location.href = "/dapur?tab=kirim"; },
             }] : []),
             {
               id: "asisten",

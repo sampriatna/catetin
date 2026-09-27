@@ -11,11 +11,13 @@ import WasteForm from "./WasteForm";
 import ProduksiForm from "./ProduksiForm";
 import Ringkasan from "./Ringkasan";
 import KelolaBahan from "./KelolaBahan";
+import KirimStok from "./KirimStok";
 
 const TABS = [
   { id: "so", label: "SO Shift" },
   { id: "waste", label: "Waste" },
   { id: "produksi", label: "Produksi" },
+  { id: "kirim", label: "Kirim Stok" },
   { id: "ringkasan", label: "Stok & Riwayat" },
   { id: "kelola", label: "Kelola", manager: true },
 ];
@@ -115,6 +117,7 @@ export default function DapurApp({ bizId, user }) {
               onPrefillUsed={clearWastePrefill} onSaved={reload} />
           )}
           {tab === "produksi" && <ProduksiForm bizId={bizId} user={user} lokasi={lokasi} items={items} recipes={recipes} snapshot={snapshot} onSaved={reload} />}
+          {tab === "kirim" && <KirimStok bizId={bizId} user={user} items={items} templates={templates} onSaved={reload} />}
           {tab === "ringkasan" && (
             <Ringkasan items={items} snapshot={snapshot} events={events} lokasiScope={lokasiScope}
               canDelete={role === "owner" || role === "admin"} onChanged={reload} />
@@ -136,7 +139,7 @@ function Shell({ children, onReload, loading }) {
           </a>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 18, fontWeight: 800 }}>Dapur & Stok</div>
-            <div style={{ fontSize: 12, color: C.sub }}>SO shift · waste · produksi</div>
+            <div style={{ fontSize: 12, color: C.sub }}>SO shift · waste · produksi · kirim stok</div>
           </div>
           {onReload && (
             <button type="button" onClick={onReload} aria-label="Muat ulang" disabled={loading}
