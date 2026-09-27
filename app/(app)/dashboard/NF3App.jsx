@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { Home, BarChart3, Sparkles, User, Mic, Bell, Inbox, Cloud, Eye, EyeOff, Plus, Wallet, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Pencil, Trash2, ShoppingCart, Users, Zap, Store, PiggyBank, MoreHorizontal, Check, X, ArrowLeft, ScanLine, Keyboard, Fingerprint, Star, ShieldCheck, Monitor, RefreshCw, Sun, Moon, Smartphone, Copy, AlertTriangle, ClipboardList, ClipboardPaste, TrendingUp, TrendingDown, Loader2, Banknote, Filter, Ban, Share2, LogOut, Tags, MessageCircle, ArrowLeftRight, Upload, Search } from "lucide-react";
 import KategoriPurchasing from "../../../components/KategoriPurchasing";
+const StockValueCard = dynamic(() => import("../../../components/dapur/StockValueCard"), { ssr: false });
 import LaporanPurchasing from "../../../components/LaporanPurchasing";
 import AsistenPurchasing from "../../../components/AsistenPurchasing";
 import NfBelanjaSearch from "../../../components/NfBelanjaSearch";
@@ -1482,6 +1483,14 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
         </div>
       </div>
 
+      {/* nilai stok (uang yang tertahan jadi barang) — owner & admin F&B */}
+      {features?.isFnB && (user.role === "owner" || user.role === "admin") && bizId && (
+        <div style={{ margin: "0 16px 20px" }}>
+          <StockValueCard bizId={bizId} saldo={totalSaldo} hide={hide}
+            onOpen={() => { window.location.href = "/dapur?tab=ringkasan"; }} />
+        </div>
+      )}
+
       {showNfOmzet && nfMonthChannels && (
         <NfChannelBreakdownCard
           breakdown={nfMonthChannels}
@@ -1869,6 +1878,24 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
               },
             },
           ];
+          if (features.isFnB) {
+            tasks.push({
+              id: "dapur",
+              title: "SO & Waste Dapur",
+              subtitle: "Hitung stok akhir shift + catat barang terbuang · laporan ke WA",
+              done: false,
+              optional: true,
+              onClick: () => { window.location.href = "/dapur"; },
+            });
+            tasks.push({
+              id: "kirimstok",
+              title: "Permintaan & Terima Stok",
+              subtitle: "Minta barang ke gudang, cek & terima kiriman yang datang",
+              done: false,
+              optional: true,
+              onClick: () => { window.location.href = "/dapur?tab=kirim"; },
+            });
+          }
           if (kasirSosmed) {
             tasks.push({
               id: "sosmed",
@@ -1909,6 +1936,21 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
               done: todayOutTx.length > 0,
               onClick: () => onCatat?.(),
             },
+            ...(features.isFnB ? [{
+              id: "dapur",
+              title: "Produksi & SO Gudang",
+              subtitle: "Catat produksi (modal otomatis), SO gudang, waste",
+              done: false,
+              optional: true,
+              onClick: () => { window.location.href = "/dapur"; },
+            }, {
+              id: "kirimstok",
+              title: "Kirim Stok ke Outlet",
+              subtitle: "Proses permintaan outlet, catat kiriman gudang → outlet",
+              done: false,
+              optional: true,
+              onClick: () => { window.location.href = "/dapur?tab=kirim"; },
+            }] : []),
             {
               id: "asisten",
               title: "Asisten Purchasing",
@@ -6006,6 +6048,9 @@ function PengaturanScreen({ s, mutate, onClose, setOverlay, setTab, bizId, authU
           )}
           {features?.purchasingModule && canDo(role, "kelolaKategoriSemua") && (
             <SRow icon={Tags} label="Alias Barang Purchasing" sub="Review & approve pengelompokan nama barang" onClick={() => setOverlay("purchasingAliases")} chev />
+          )}
+          {features?.isFnB && (
+            <SRow icon={ClipboardList} label="Dapur & Stok" sub="SO shift, waste, produksi, nilai stok per lokasi" onClick={() => { window.location.href = "/dapur"; }} chev />
           )}
           {features?.sosmedReports && canInputSosmed(s.currentUser || {}, s.sosmedConfig) && (role !== "kasir" || isSosmedEnabled(s.sosmedConfig, s.currentUser?.outlet)) && (
             <SRow icon={Smartphone} label="Daily Report Sosmed" sub={`${sosmedDisplayName(s.currentUser?.outlet || "KBU")} · isi laporan hari ini`} onClick={() => setOverlay("sosmedHarian")} chev />

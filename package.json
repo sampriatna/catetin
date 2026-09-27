@@ -16,7 +16,8 @@
     "audit:duplicates": "node scripts/auditDailyReportDuplicates.mjs",
     "import:purchasing": "node scripts/importPurchasingExcel.mjs",
     "scan:item-aliases": "node scripts/scanItemAliases.mjs",
-    "start": "next start"
+    "start": "next start",
+    "test:inventory": "node --test lib/inventoryLogic.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.105.0",
