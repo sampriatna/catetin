@@ -14,6 +14,9 @@ returns text language sql security definer stable set search_path = public as $$
   limit 1;
 $$;
 
+revoke all on function public.business_outlet(uuid) from public, anon;
+grant execute on function public.business_outlet(uuid) to authenticated;
+
 -- ── Master bahan ────────────────────────────────────────────
 create table if not exists public.inv_items (
   id uuid primary key default gen_random_uuid(),
@@ -289,6 +292,7 @@ as $$
   order by e.lokasi, l.item_id, e.tanggal desc, e.created_at desc;
 $$;
 
+revoke all on function public.inv_stock_snapshot(uuid) from public, anon;
 grant execute on function public.inv_stock_snapshot(uuid) to authenticated;
 
 commit;
