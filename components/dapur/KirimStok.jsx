@@ -9,7 +9,7 @@ import {
   parseWaStock, applyWaToRows,
 } from "../../lib/inventoryLogic";
 import { loadTransfers, saveTransfer, uploadFotos } from "../../lib/inventoryRepo";
-import { C, card, input, label, Btn, WaButton, Chips, Notice, SearchBox, ItemPicker, QtyInput, FotoPicker, PasteWaPanel, AreaChips } from "./ui";
+import { C, card, input, label, Btn, WaButton, Chips, Notice, SearchBox, ItemPicker, QtyInput, FotoPicker, PasteWaPanel, AreaChips, dateInput } from "./ui";
 
 const STATUS_COLOR = {
   diminta: [C.warnSoft, C.warn],
@@ -262,7 +262,7 @@ function FormBaru({ bizId, user, action, items, templates, itemsById, onCancel, 
         )}
         <div>
           <span style={label}>{action === "minta" ? "Tanggal butuh" : "Tanggal kirim"}</span>
-          <input type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} style={input} />
+          <input type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} style={dateInput} />
         </div>
       </div>
 

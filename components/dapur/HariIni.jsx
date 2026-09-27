@@ -7,11 +7,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, ChevronRight, Circle, AlertTriangle } from "lucide-react";
 import {
-  LOKASI, LOKASI_LABEL, canManageMaster, isOutletLocked, summarizeDapurToday, stockStatus, todayJakarta, fmtJam, fmtRp, fmtQty,
+  LOKASI, LOKASI_LABEL, PRIORITY, PRIORITY_LABEL, canManageMaster, isOutletLocked, summarizeDapurToday, soAreaStatus, stockStatus, todayJakarta, fmtJam, fmtRp, fmtQty,
 } from "../../lib/inventoryLogic";
 import { loadDapurToday } from "../../lib/inventoryRepo";
 import { C, card, Notice } from "./ui";
 import StockValueCard from "./StockValueCard";
+import { useStockAudit, FindingRow, PRIORITY_COLOR } from "./AuditStok";
 
 function Task({ done, urgent, title, sub, onClick }) {
   const Icon = done ? CheckCircle2 : urgent ? AlertTriangle : Circle;
@@ -97,14 +98,11 @@ export default function HariIni({ bizId, user, lokasi, items, snapshot, onGo }) 
 
         {!scopeLokasi && (
           <>
-            {LOKASI.map((l) => {
-              const e = st.soByLokasi[l];
-              return (
-                <Task key={l} done={!!e} title={`SO ${LOKASI_LABEL[l] || l}`}
-                  sub={e ? `Terakhir ${fmtJam(e.created_at)} · ${e.created_by_name || "—"}` : "Belum ada SO hari ini"}
-                  onClick={() => onGo("ringkasan")} />
-              );
-            })}
+            {soAreaStatus(st.soByArea).map((a) => (
+              <Task key={a.label} done={!!a.event} title={`SO ${a.label}`}
+                sub={a.event ? `Terkirim ${fmtJam(a.event.created_at)} · ${a.event.created_by_name || "—"}` : "Belum ada SO hari ini"}
+                onClick={() => onGo("ringkasan")} />
+            ))}
             <Task urgent={st.permintaanMenunggu > 0} title={`Permintaan menunggu gudang (${st.permintaanMenunggu})`}
               sub={st.kirimanMasuk ? `${st.kirimanMasuk} kiriman belum diterima outlet` : "Tidak ada kiriman di jalan"}
               onClick={() => onGo("kirim")} />
@@ -133,9 +131,43 @@ export default function HariIni({ bizId, user, lokasi, items, snapshot, onGo }) 
         </div>
       )}
 
+      {manager && <AnomaliCard bizId={bizId} items={items} onGo={onGo} />}
+
       {(manager || role === "purchasing") && (
         <StockValueCard bizId={bizId} lokasiScope={scopeLokasi ? [scopeLokasi] : LOKASI} />
       )}
+    </div>
+  );
+}
+
+/** Ringkasan temuan audit 7 hari untuk owner/admin. */
+function AnomaliCard({ bizId, items, onGo }) {
+  const audit = useStockAudit(bizId, items);
+  const itemsById = useMemo(() => Object.fromEntries((items || []).map((i) => [i.id, i])), [items]);
+  if (audit.loading) return null;
+  if (audit.err) return <Notice kind="warn">Audit belum bisa dihitung: {audit.err}</Notice>;
+  const n = audit.findings.length;
+  const pending = audit.findings.filter((f) => f.status === "Menunggu data penjualan").length;
+  const top = audit.findings.filter((f) => f.priority !== "INFO").slice(0, 3);
+  return (
+    <div style={{ ...card, padding: 0 }}>
+      <div style={{ padding: "12px 14px 8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontWeight: 800 }}>Insight stok · 7 hari</span>
+        <button type="button" onClick={() => onGo("audit")} style={{ border: "none", background: "none", color: C.brand, fontWeight: 800, fontSize: 12, cursor: "pointer" }}>Semua ›</button>
+      </div>
+      <div style={{ display: "flex", gap: 6, padding: "0 14px 10px", flexWrap: "wrap" }}>
+        {[...PRIORITY].reverse().map((p) => {
+          const c = audit.findings.filter((f) => f.priority === p).length;
+          const [bg, fg] = PRIORITY_COLOR[p];
+          return <span key={p} style={{ background: bg, color: fg, fontSize: 12, fontWeight: 800, padding: "4px 10px", borderRadius: 999 }}>{PRIORITY_LABEL[p]} {c}</span>;
+        })}
+      </div>
+      <div style={{ padding: "0 14px 10px", fontSize: 13, color: C.ink }}>
+        {n === 0
+          ? "Belum ada kejanggalan. Temuan muncul setelah barang di-SO minimal 2 kali."
+          : `${n} hal perlu diperiksa${pending ? `, ${pending} menunggu data penjualan untuk dipastikan` : ""}.`}
+      </div>
+      {top.map((f, i) => <FindingRow key={i} f={f} itemsById={itemsById} />)}
     </div>
   );
 }

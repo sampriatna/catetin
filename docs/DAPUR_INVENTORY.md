@@ -31,6 +31,22 @@ Setiap simpan menghasilkan teks laporan dan tombol **Kirim laporan ke WhatsApp**
 - Role **dapur** hanya membuka modul Dapur (beranda langsung ke `/dapur`, tanpa akses uang). Buat lewat Pengaturan → Staf → Undang → peran **Dapur** + outlet.
 - Area daftar SO (`inv_so_template.area`): `dapur`, `bar`, atau kosong (semua). Bisa diubah di Kelola → Daftar SO → "Dihitung oleh". Setiap akun tetap bisa pindah ke daftar lain lewat pilihan "Daftar".
 
+## Audit stok harian (Tahap A)
+
+Sumber kebenaran = SO fisik. Penjualan belum dipakai (mode pemantauan harian).
+
+- **Barang Masuk** (tab baru): pembelian / retur / koreksi / lainnya, satuan bebas, nilai dari modal. Kasir & dapur hanya untuk outletnya.
+- **Waste**: staf memilih nama yang biasa dipakai dan mengisi satuan apa pun (porsi, gram, ml, pcs, kg, L); Rp dihitung otomatis dari modal. Penyebab: basi, rusak, tumpah, salah produksi/gosong, kualitas, sisa, retur, staff meal, complimentary, trial/R&D, lainnya.
+- SO dan waste menyimpan **area** (dapur / bar) → status SO per area: Gudang, KBU Kitchen, KBU Bar, Kisamen Kitchen, Kisamen Bar, Samtaro.
+- `inv_stock_movements` (SQL) mengumpulkan SO, waste, barang masuk, produksi, kiriman keluar/diterima dalam satuan master. `auditMovements` (JS) menghitung per pasangan SO: **stok seharusnya = SO lalu + masuk − keluar**, **selisih = SO − seharusnya** (SO tidak diubah), lalu mencari:
+  - naik tanpa barang masuk (keyakinan sedang),
+  - SO sama persis 3× tanpa pergerakan (rendah),
+  - berkurang jauh di atas pola biasanya tanpa waste → *menunggu data penjualan* (rendah),
+  - angka selalu bulat/estimasi (info),
+  - waste ≥ Rp50.000 per barang dalam 7 hari (tinggi).
+- Prioritas dari nilai Rp: Info < Rp25rb ≤ Pantau < Rp100rb ≤ Peringatan < Rp500rb ≤ Kritis; berulang ≥3× naik satu tingkat.
+- Owner/admin: kartu **Insight stok** di Hari Ini dan tab **Audit** (filter lokasi & prioritas, rincian buku pergerakan per barang).
+
 ## Checklist beranda
 
 - **Kasir** (bar KBU, minuman KSM, Samtaro): tugas wajib **SO Stok Akhir Shift** di checklist harian bersama omset/SDM/sosmed. Selesai (✓) setelah akun itu mengirim SO hari ini. **Terima Kiriman Gudang** jadi mendesak kalau ada kiriman yang belum dicek.
@@ -64,6 +80,7 @@ Kartu **Nilai Stok** (beranda owner/admin & tab Stok & Riwayat): total dan per l
 4. Jalankan `supabase/seed/inventory_so_template_nusa_food.sql` — 152 baris daftar SO (KBU dapur+bar, KSM bahan/bumbu/topping/ala carte/minuman, SMT) dari laporan WA 26 Sep + jawaban owner soal konversi, dan 73 bahan/setengah jadi baru (modal 0, perlu diisi). Sisa konversi (ukuran botol sirup, Saori, sea salt) diisi purchasing di Kelola → Daftar SO lewat kolom "1 btl = … ml".
 5. Jalankan `supabase/migrations/20260928090000_inventory_transfer.sql` (tabel `inv_transfers`, `inv_transfer_lines`, RPC `inv_transfer_save`).
 6. Jalankan `supabase/migrations/20260928120000_inventory_dapur_roles.sql` (role `dapur`, area daftar SO, `inv_stock_value_series`) lalu `supabase/seed/inventory_so_area_nusa_food.sql`.
-7. Buat resep produksi di tab Kelola → Resep.
+7. Jalankan `supabase/migrations/20260929090000_inventory_audit_tahap_a.sql` (area, barang masuk, `inv_stock_movements`).
+8. Buat resep produksi di tab Kelola → Resep.
 
 Test logika: `npm run test:inventory`.
