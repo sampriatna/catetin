@@ -218,6 +218,10 @@ function TemplateEditor({ bizId, row, lokasi, items, onDone, onCancel }) {
     ...row, isi: row?.isi ?? "", urut: row?.urut ?? "",
   });
   const [item, setItem] = useState(row?.item_id ? byId[row.item_id] || null : null);
+  const [balik, setBalik] = useState(() => {
+    const n = Number(row?.isi);
+    return n > 0 && n < 1 ? String(Math.round((1 / n) * 1000) / 1000) : "";
+  });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
@@ -245,10 +249,21 @@ function TemplateEditor({ bizId, row, lokasi, items, onDone, onCancel }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <div><span style={label}>Satuan hitung staf</span><input style={input} value={f.satuan_so} onChange={(e) => set("satuan_so", e.target.value)} placeholder="porsi / karung / ml" /></div>
         <div>
-          <span style={label}>Isi per 1 {f.satuan_so || "satuan"}{item ? ` (dalam ${item.satuan})` : ""}</span>
+          <span style={label}>1 {f.satuan_so || "satuan"} = … {item?.satuan || ""}</span>
           <input style={input} inputMode="decimal" value={f.isi} onChange={(e) => set("isi", e.target.value)} placeholder="kosong = belum tahu" />
         </div>
       </div>
+      {item && f.satuan_so && (
+        <div>
+          <span style={label}>Atau isi kebalikannya: 1 {item.satuan} = … {f.satuan_so} (mis. 1 btl = 750 ml)</span>
+          <input style={input} inputMode="decimal" value={balik} placeholder="ukuran kemasan"
+            onChange={(e) => {
+              setBalik(e.target.value);
+              const n = Number(String(e.target.value).replace(",", "."));
+              set("isi", n > 0 ? String(Math.round((1 / n) * 1e6) / 1e6) : "");
+            }} />
+        </div>
+      )}
       <div style={{ fontSize: 12, color: C.sub }}>
         Contoh: Beras dihitung per <b>karung</b>, master dalam <b>kg</b> → isi 25. Sirup dihitung <b>ml</b>, master <b>btl</b> → isi = 1/volume botol (botol 750 ml → 0,001333).
         Kalau satuan sama atau kg↔gr / L↔ml, isi boleh dikosongkan. Selama konversi belum ada, SO tetap tersimpan tapi tidak masuk nilai stok.

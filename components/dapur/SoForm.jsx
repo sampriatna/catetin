@@ -34,6 +34,7 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
   const [shift, setShift] = useState("Tutup");
   const [tanggal, setTanggal] = useState(todayJakarta());
   const [catatan, setCatatan] = useState("");
+  const [extras, setExtras] = useState([]); // barang di luar daftar: { nama, qty, satuan }
   const [fotos, setFotos] = useState([]);
   const [q, setQ] = useState("");
   const [grup, setGrup] = useState("Semua");
@@ -48,6 +49,7 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
   useEffect(() => {
     const d = readDraft(key);
     setCounts(d?.counts || {});
+    setExtras(d?.extras || []);
     if (d?.shift) setShift(d.shift);
     setDone(null);
     setErr("");
@@ -57,9 +59,9 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
   }, [key]);
 
   useEffect(() => {
-    const filled = Object.values(counts).some((v) => String(v ?? "").trim() !== "");
-    writeDraft(key, filled ? { counts, shift } : null);
-  }, [key, counts, shift]);
+    const filled = Object.values(counts).some((v) => String(v ?? "").trim() !== "") || extras.length > 0;
+    writeDraft(key, filled ? { counts, shift, extras } : null);
+  }, [key, counts, shift, extras]);
 
   // Bahan di luar daftar SO outlet disembunyikan dulu (masih bisa dibuka) supaya daftar sama dengan kebiasaan staf.
   const baseRows = useMemo(() => (hasTemplate && !showOthers ? rows.filter((r) => r.template || String(counts[r.key] ?? "").trim() !== "") : rows), [rows, hasTemplate, showOthers, counts]);
@@ -85,6 +87,16 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
     setCounts((c) => ({ ...c, ...res.counts }));
     if (parsed.tanggal) setTanggal(parsed.tanggal);
     const waste = wasteFromWa(parsed, rows);
+    // Baris WA yang tidak ada di daftar tetap dicatat sebagai "tambahan" supaya tidak hilang.
+    if (res.unmatched.length) {
+      setExtras((xs) => {
+        const have = new Set(xs.map((x) => x.nama.toLowerCase()));
+        const add = res.unmatched
+          .filter((u) => !have.has(u.label.toLowerCase()))
+          .map((u) => ({ nama: u.label, qty: String(u.terms.reduce((a, t) => a + t.qty, 0)).replace(".", ","), satuan: u.terms.find((t) => t.unit)?.unit || "" }));
+        return [...xs, ...add];
+      });
+    }
     setPasteInfo({
       matched: res.matched.length,
       unmatched: res.unmatched.map((u) => u.raw),
@@ -111,8 +123,11 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
       }
       setBusy("Menyimpan…");
       const payload = lines.map(({ converted, ...l }) => l);
+      const tambahan = extras.filter((x) => x.nama.trim()).map((x) => ({ nama: x.nama.trim(), qty: x.qty, satuan: x.satuan }));
+      const catatanFull = [catatan.trim(), tambahan.length ? `Tambahan (belum di daftar): ${tambahan.map((x) => `${x.nama} ${x.qty} ${x.satuan}`.trim()).join("; ")}` : ""]
+        .filter(Boolean).join("\n");
       const res = await submitEvent(bizId, {
-        client_ref: refId.current, jenis: "so", lokasi, tanggal, shift, catatan, created_by_name: user?.name, foto,
+        client_ref: refId.current, jenis: "so", lokasi, tanggal, shift, catatan: catatanFull, created_by_name: user?.name, foto,
       }, payload);
       // Urut sesuai form (grup), pakai nama & satuan staf.
       const filledRows = rows.filter((r) => { const v = parseQty(counts[r.key]); return v !== null && !Number.isNaN(v); });
@@ -131,10 +146,11 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
         };
       });
       total = round2(total);
-      const text = formatSoWa({ lokasi, tanggal, shift, by: user?.name, lines: waLines, total, catatan, foto: foto.length, belumKonversi });
+      const text = formatSoWa({ lokasi, tanggal, shift, by: user?.name, lines: waLines, total, catatan, foto: foto.length, belumKonversi, tambahan });
       setDone({ text, total, count: lines.length, duplicate: !!res?.duplicate });
       setCounts({});
       setCatatan("");
+      setExtras([]);
       setFotos([]);
       setPasteInfo(null);
       writeDraft(key, null);
@@ -242,6 +258,25 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
         {visible.length === 0 && <div style={{ padding: 14, fontSize: 13, color: C.sub }}>Tidak ada bahan yang cocok.</div>}
       </div>
 
+      <div style={{ ...card, display: "grid", gap: 8 }}>
+        <span style={{ ...label, marginBottom: 0 }}>Barang tambahan (belum ada di daftar) — opsional</span>
+        <div style={{ fontSize: 12, color: C.sub }}>
+          Mis. menu baru atau barang titipan. Ikut terkirim di laporan WA; purchasing/admin bisa menambahkannya ke daftar SO di Kelola.
+        </div>
+        {extras.map((x, i) => (
+          <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input style={{ ...input, flex: 2 }} value={x.nama} placeholder="Nama barang"
+              onChange={(e) => setExtras((xs) => xs.map((y, j) => (j === i ? { ...y, nama: e.target.value } : y)))} />
+            <QtyInput value={x.qty} width={70} onChange={(v) => setExtras((xs) => xs.map((y, j) => (j === i ? { ...y, qty: v } : y)))} />
+            <input style={{ ...input, width: 70 }} value={x.satuan} placeholder="pcs"
+              onChange={(e) => setExtras((xs) => xs.map((y, j) => (j === i ? { ...y, satuan: e.target.value } : y)))} />
+            <button type="button" aria-label="Hapus" onClick={() => setExtras((xs) => xs.filter((_, j) => j !== i))}
+              style={{ border: "none", background: C.badSoft, color: C.bad, borderRadius: 10, padding: "8px 10px", cursor: "pointer", fontWeight: 800 }}>×</button>
+          </div>
+        ))}
+        <Btn kind="ghost" onClick={() => setExtras((xs) => [...xs, { nama: "", qty: "", satuan: "" }])}>+ Tambah barang</Btn>
+      </div>
+
       <FotoPicker files={fotos} onChange={setFotos} />
 
       <div style={card}>
@@ -254,8 +289,8 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
       <Btn onClick={submit} disabled={!!busy || filledCount === 0}>
         {busy || `Simpan SO (${filledCount} bahan${fotos.length ? ` · ${fotos.length} foto` : ""})`}
       </Btn>
-      {Object.keys(counts).length > 0 && !busy && (
-        <Btn kind="danger" onClick={() => { if (window.confirm("Kosongkan semua isian SO?")) setCounts({}); }}>Kosongkan isian</Btn>
+      {(Object.keys(counts).length > 0 || extras.length > 0) && !busy && (
+        <Btn kind="danger" onClick={() => { if (window.confirm("Kosongkan semua isian SO?")) { setCounts({}); setExtras([]); } }}>Kosongkan isian</Btn>
       )}
     </div>
   );
@@ -276,9 +311,9 @@ function PasteResult({ info, onWaste, onClose }) {
       )}
       {info.unmatched.length > 0 && (
         <div style={{ fontSize: 13 }}>
-          <b>Tidak dikenali (tidak ada di daftar):</b>
+          <b>Tidak ada di daftar — dimasukkan ke "Barang tambahan":</b>
           <ul style={{ margin: "4px 0 0 18px", padding: 0 }}>{info.unmatched.map((t) => <li key={t}>{t}</li>)}</ul>
-          <div style={{ color: C.sub, fontSize: 12, marginTop: 4 }}>Cari manual di daftar, atau minta purchasing menambahkannya ke daftar SO.</div>
+          <div style={{ color: C.sub, fontSize: 12, marginTop: 4 }}>Kalau sebenarnya ada di daftar dengan nama lain, isi manual di daftar lalu hapus dari tambahan.</div>
         </div>
       )}
       {info.notes.length > 0 && <div style={{ fontSize: 13 }}><b>Menipis (dari laporan):</b> {info.notes.join(", ")}</div>}
