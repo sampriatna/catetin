@@ -3,8 +3,8 @@
 
 import { useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
-import { LOKASI, TIPE_LABEL, searchItems, fmtRp, fmtQty } from "../../lib/inventoryLogic";
-import { saveItem, saveRecipe } from "../../lib/inventoryRepo";
+import { LOKASI, LOKASI_LABEL, TIPE_LABEL, searchItems, normSearch, rowFactor, fmtRp, fmtQty } from "../../lib/inventoryLogic";
+import { saveItem, saveRecipe, saveSoTemplate } from "../../lib/inventoryRepo";
 import { C, card, input, label, Btn, Chips, Notice, SearchBox, ItemPicker, QtyInput } from "./ui";
 
 const EMPTY_ITEM = { kode: "", nama: "", kategori: "", tipe: "bahan", satuan: "pcs", harga: "", lokasi: [], min_stok: "", aktif: true, catatan: "" };
@@ -129,7 +129,7 @@ function RecipeEditor({ bizId, recipe, items, onDone, onCancel }) {
   );
 }
 
-export default function KelolaBahan({ bizId, items, recipes, onChanged }) {
+export default function KelolaBahan({ bizId, items, recipes, templates, onChanged }) {
   const [mode, setMode] = useState("Bahan");
   const [q, setQ] = useState("");
   const [tipe, setTipe] = useState("all");
@@ -146,11 +146,19 @@ export default function KelolaBahan({ bizId, items, recipes, onChanged }) {
   const done = () => { setEditing(null); onChanged?.(); };
 
   if (editing && mode === "Bahan") return <ItemEditor bizId={bizId} item={editing.id ? editing : null} onDone={done} onCancel={() => setEditing(null)} />;
+  if (mode === "Daftar SO") {
+    return (
+      <div style={{ display: "grid", gap: 12 }}>
+        <Chips options={["Bahan", "Resep", "Daftar SO"]} value={mode} onChange={(m) => { setEditing(null); setMode(m); }} />
+        <DaftarSo bizId={bizId} items={items || []} templates={templates || []} onChanged={onChanged} />
+      </div>
+    );
+  }
   if (editing && mode === "Resep") return <RecipeEditor bizId={bizId} recipe={editing.id ? editing : null} items={(items || []).filter((i) => i.aktif !== false)} onDone={done} onCancel={() => setEditing(null)} />;
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      <Chips options={["Bahan", "Resep"]} value={mode} onChange={setMode} />
+      <Chips options={["Bahan", "Resep", "Daftar SO"]} value={mode} onChange={setMode} />
       {mode === "Bahan" ? (
         <>
           <Btn kind="ghost" onClick={() => setEditing({})}>+ Tambah bahan</Btn>
@@ -198,5 +206,120 @@ export default function KelolaBahan({ bizId, items, recipes, onChanged }) {
         </>
       )}
     </div>
+  );
+}
+
+// ── Daftar SO per outlet: nama & satuan staf + konversi ke satuan master ──
+
+function TemplateEditor({ bizId, row, lokasi, items, onDone, onCancel }) {
+  const byId = useMemo(() => Object.fromEntries(items.map((i) => [i.id, i])), [items]);
+  const [f, setF] = useState({
+    lokasi, label: "", grup: "", urut: "", satuan_so: "", isi: "", catatan: "", aktif: true,
+    ...row, isi: row?.isi ?? "", urut: row?.urut ?? "",
+  });
+  const [item, setItem] = useState(row?.item_id ? byId[row.item_id] || null : null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  async function save() {
+    setBusy(true); setErr("");
+    try { await saveSoTemplate(bizId, { ...f, item_id: item?.id }); onDone(); } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); }
+  }
+  return (
+    <div style={{ ...card, display: "grid", gap: 10 }}>
+      <div style={{ fontWeight: 800 }}>{row?.id ? "Ubah baris daftar SO" : "Tambah ke daftar SO"} · {LOKASI_LABEL[lokasi] || lokasi}</div>
+      <div><span style={label}>Nama seperti ditulis staf</span><input style={input} value={f.label} onChange={(e) => set("label", e.target.value)} /></div>
+      <div>
+        <span style={label}>Bahan di master</span>
+        {item ? (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <div style={{ fontSize: 14 }}><b>{item.nama}</b> <span style={{ color: C.sub }}>({item.kode} · {item.satuan} · {fmtRp(item.harga)}/{item.satuan})</span></div>
+            <button type="button" onClick={() => setItem(null)} style={{ border: "none", background: "transparent", color: C.brand, fontWeight: 700, cursor: "pointer" }}>Ganti</button>
+          </div>
+        ) : <ItemPicker items={items.filter((i) => i.aktif !== false)} onPick={setItem} />}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <div><span style={label}>Grup</span><input style={input} value={f.grup || ""} onChange={(e) => set("grup", e.target.value)} placeholder="Dapur / Bar / Topping" /></div>
+        <div><span style={label}>Urutan</span><input style={input} inputMode="numeric" value={f.urut} onChange={(e) => set("urut", e.target.value)} /></div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <div><span style={label}>Satuan hitung staf</span><input style={input} value={f.satuan_so} onChange={(e) => set("satuan_so", e.target.value)} placeholder="porsi / karung / ml" /></div>
+        <div>
+          <span style={label}>Isi per 1 {f.satuan_so || "satuan"}{item ? ` (dalam ${item.satuan})` : ""}</span>
+          <input style={input} inputMode="decimal" value={f.isi} onChange={(e) => set("isi", e.target.value)} placeholder="kosong = belum tahu" />
+        </div>
+      </div>
+      <div style={{ fontSize: 12, color: C.sub }}>
+        Contoh: Beras dihitung per <b>karung</b>, master dalam <b>kg</b> → isi 25. Sirup dihitung <b>ml</b>, master <b>btl</b> → isi = 1/volume botol (botol 750 ml → 0,001333).
+        Kalau satuan sama atau kg↔gr / L↔ml, isi boleh dikosongkan. Selama konversi belum ada, SO tetap tersimpan tapi tidak masuk nilai stok.
+      </div>
+      <div><span style={label}>Catatan</span><input style={input} value={f.catatan || ""} onChange={(e) => set("catatan", e.target.value)} /></div>
+      <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
+        <input type="checkbox" checked={f.aktif !== false} onChange={(e) => set("aktif", e.target.checked)} /> Aktif (tampil di form SO)
+      </label>
+      {err && <Notice kind="bad">{err}</Notice>}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <Btn kind="ghost" onClick={onCancel}>Batal</Btn>
+        <Btn onClick={save} disabled={busy}>{busy ? "Menyimpan…" : "Simpan"}</Btn>
+      </div>
+    </div>
+  );
+}
+
+function DaftarSo({ bizId, items, templates, onChanged }) {
+  const [lokasi, setLokasi] = useState("KBU");
+  const [q, setQ] = useState("");
+  const [onlyTodo, setOnlyTodo] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const byId = useMemo(() => Object.fromEntries(items.map((i) => [i.id, i])), [items]);
+  const rows = useMemo(() => {
+    const words = normSearch(q).split(" ").filter(Boolean);
+    return templates
+      .filter((t) => t.lokasi === lokasi && byId[t.item_id])
+      .map((t) => ({ ...t, item: byId[t.item_id], factor: rowFactor({ isi: t.isi, satuan_so: t.satuan_so, item: byId[t.item_id] }) }))
+      .filter((t) => !onlyTodo || t.factor === null)
+      .filter((t) => !words.length || words.every((w) => normSearch(`${t.label} ${t.item.nama} ${t.grup || ""}`).includes(w)))
+      .sort((a, b) => (a.urut || 0) - (b.urut || 0));
+  }, [templates, lokasi, byId, q, onlyTodo]);
+  const todo = templates.filter((t) => t.lokasi === lokasi && byId[t.item_id] && rowFactor({ isi: t.isi, satuan_so: t.satuan_so, item: byId[t.item_id] }) === null).length;
+
+  if (editing) {
+    const nextUrut = Math.max(0, ...templates.filter((t) => t.lokasi === lokasi).map((t) => t.urut || 0)) + 10;
+    return <TemplateEditor bizId={bizId} lokasi={lokasi} items={items} row={editing.id ? editing : { urut: nextUrut }}
+      onDone={() => { setEditing(null); onChanged?.(); }} onCancel={() => setEditing(null)} />;
+  }
+
+  return (
+    <>
+      <Chips options={LOKASI} value={lokasi} onChange={setLokasi} getLabel={(l) => LOKASI_LABEL[l] || l} />
+      <Notice kind={todo ? "warn" : "info"}>
+        Daftar ini = urutan, nama, dan satuan yang dipakai staf saat SO (sama seperti laporan WA).
+        {todo ? ` ${todo} baris belum punya konversi ke satuan master — nilainya belum masuk nilai stok.` : " Semua baris sudah punya konversi."}
+      </Notice>
+      <Btn kind="ghost" onClick={() => setEditing({})}>+ Tambah ke daftar SO</Btn>
+      <div style={{ ...card, display: "grid", gap: 8 }}>
+        <SearchBox value={q} onChange={setQ} placeholder="Cari di daftar SO…" />
+        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: C.sub }}>
+          <input type="checkbox" checked={onlyTodo} onChange={(e) => setOnlyTodo(e.target.checked)} /> Hanya yang konversinya belum diatur
+        </label>
+      </div>
+      <div style={{ ...card, padding: 0 }}>
+        {rows.map((t) => (
+          <button key={t.id} type="button" onClick={() => setEditing(t)}
+            style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", border: "none", borderBottom: `1px solid ${C.line}`, background: t.aktif === false ? C.bg : "#fff", cursor: "pointer" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <span style={{ fontWeight: 700, fontSize: 14 }}>{t.label}{t.aktif === false ? " (nonaktif)" : ""}</span>
+              <span style={{ fontSize: 12, color: C.sub }}>{t.grup}</span>
+            </div>
+            <div style={{ fontSize: 12, color: t.factor === null ? C.warn : C.sub }}>
+              {t.item.nama} · hitung per {t.satuan_so} ·{" "}
+              {t.factor === null ? `konversi ke ${t.item.satuan} belum diatur` : `1 ${t.satuan_so} = ${fmtQty(t.factor, 6)} ${t.item.satuan}`}
+            </div>
+            {t.catatan && <div style={{ fontSize: 12, color: C.warn }}>{t.catatan}</div>}
+          </button>
+        ))}
+        {!rows.length && <div style={{ padding: 14, fontSize: 13, color: C.sub }}>Belum ada daftar SO untuk lokasi ini — form SO memakai semua bahan lokasi.</div>}
+      </div>
+    </>
   );
 }

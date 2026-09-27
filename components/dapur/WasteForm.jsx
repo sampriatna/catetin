@@ -1,24 +1,39 @@
 "use client";
 // Catat waste / barang terbuang di satu lokasi.
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Trash2 } from "lucide-react";
 import {
   SHIFTS, WASTE_REASONS, itemsForLokasi, parseQty, round2, makeClientRef, todayJakarta, formatWasteWa, fmtRp,
 } from "../../lib/inventoryLogic";
-import { submitEvent } from "../../lib/inventoryRepo";
-import { C, card, input, label, Btn, WaButton, Chips, Notice, ItemPicker, QtyInput } from "./ui";
+import { submitEvent, uploadFotos } from "../../lib/inventoryRepo";
+import { C, card, input, label, Btn, WaButton, Chips, Notice, ItemPicker, QtyInput, FotoPicker } from "./ui";
 
-export default function WasteForm({ bizId, user, lokasi, items, onSaved }) {
+export default function WasteForm({ bizId, user, lokasi, items, prefill, onPrefillUsed, onSaved }) {
   const lokasiItems = useMemo(() => itemsForLokasi(items, lokasi), [items, lokasi]);
   const [rows, setRows] = useState([]);
   const [shift, setShift] = useState("Tutup");
   const [tanggal, setTanggal] = useState(todayJakarta());
   const [catatan, setCatatan] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [fotos, setFotos] = useState([]);
+  const [fromWa, setFromWa] = useState(null);
+  const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
   const [done, setDone] = useState(null);
   const refId = useRef(makeClientRef("waste"));
+
+  // Bagian WASTE dari laporan WA yang ditempel di form SO.
+  useEffect(() => {
+    if (!prefill) return;
+    setRows((rs) => {
+      const have = new Set(rs.map((r) => r.item.id));
+      const add = (prefill.rows || []).filter((r) => !have.has(r.item.id))
+        .map((r) => ({ item: r.item, qty: String(r.qty).replace(".", ","), alasan: WASTE_REASONS[0] }));
+      return [...rs, ...add];
+    });
+    setFromWa({ count: (prefill.rows || []).length, unmatched: (prefill.unmatched || []).map((u) => u.raw) });
+    onPrefillUsed?.();
+  }, [prefill, onPrefillUsed]);
 
   const total = round2(rows.reduce((s, r) => s + (parseQty(r.qty) || 0) * (Number(r.item.harga) || 0), 0));
 
@@ -31,26 +46,33 @@ export default function WasteForm({ bizId, user, lokasi, items, onSaved }) {
     const bad = rows.filter((r) => { const q = parseQty(r.qty); return q === null || Number.isNaN(q) || q <= 0; });
     if (!rows.length) { setErr("Tambahkan minimal satu bahan."); return; }
     if (bad.length) { setErr(`Isi jumlah yang benar untuk: ${bad.map((r) => r.item.nama).join(", ")}`); return; }
-    setBusy(true);
     try {
+      let foto = [];
+      if (fotos.length) {
+        setBusy("Upload foto…");
+        foto = await uploadFotos(bizId, refId.current, fotos, tanggal);
+      }
+      setBusy("Menyimpan…");
       const lines = rows.map((r) => ({ item_id: r.item.id, qty: parseQty(r.qty), alasan: r.alasan }));
       const res = await submitEvent(bizId, {
-        client_ref: refId.current, jenis: "waste", lokasi, tanggal, shift, catatan, created_by_name: user?.name,
+        client_ref: refId.current, jenis: "waste", lokasi, tanggal, shift, catatan, created_by_name: user?.name, foto,
       }, lines);
       const waLines = rows.map((r) => {
         const q = parseQty(r.qty);
         return { nama: r.item.nama, satuan: r.item.satuan, qty: q, alasan: r.alasan, nilai: q * (Number(r.item.harga) || 0) };
       });
-      const text = formatWasteWa({ lokasi, tanggal, shift, by: user?.name, lines: waLines, total, catatan });
+      const text = formatWasteWa({ lokasi, tanggal, shift, by: user?.name, lines: waLines, total, catatan, foto: foto.length });
       setDone({ text, total, duplicate: !!res?.duplicate });
       setRows([]);
       setCatatan("");
+      setFotos([]);
+      setFromWa(null);
       refId.current = makeClientRef("waste");
       onSaved?.();
     } catch (e) {
       setErr(e.message || String(e));
     } finally {
-      setBusy(false);
+      setBusy("");
     }
   }
 
@@ -77,6 +99,13 @@ export default function WasteForm({ bizId, user, lokasi, items, onSaved }) {
           <input type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} style={input} />
         </div>
       </div>
+
+      {fromWa && (
+        <Notice kind={fromWa.unmatched.length ? "warn" : "info"}>
+          {fromWa.count} bahan diisi dari bagian WASTE laporan WA — pilih alasannya lalu simpan.
+          {fromWa.unmatched.length > 0 && <> Tidak dikenali / satuan belum diatur: {fromWa.unmatched.join("; ")}.</>}
+        </Notice>
+      )}
 
       <div style={{ ...card, display: "grid", gap: 10 }}>
         <span style={label}>Tambah bahan yang terbuang</span>
@@ -111,9 +140,11 @@ export default function WasteForm({ bizId, user, lokasi, items, onSaved }) {
           placeholder="Mis. freezer mati jam 3 sore" />
       </div>
 
+      <FotoPicker files={fotos} onChange={setFotos} hint="Foto barang yang dibuang sebagai bukti." />
+
       {rows.length > 0 && <Notice kind="warn">Total nilai waste: <b>{fmtRp(total)}</b></Notice>}
       {err && <Notice kind="bad">{err}</Notice>}
-      <Btn onClick={submit} disabled={busy || rows.length === 0}>{busy ? "Menyimpan…" : "Simpan Waste"}</Btn>
+      <Btn onClick={submit} disabled={!!busy || rows.length === 0}>{busy || `Simpan Waste${fotos.length ? ` · ${fotos.length} foto` : ""}`}</Btn>
     </div>
   );
 }

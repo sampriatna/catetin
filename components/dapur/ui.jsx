@@ -1,8 +1,8 @@
 "use client";
 // Komponen & gaya bersama modul Dapur.
 
-import { useMemo, useState } from "react";
-import { Search, Share2, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Camera, ClipboardPaste, Search, Share2, X } from "lucide-react";
 import { searchItems, fmtQty } from "../../lib/inventoryLogic";
 import { openWhatsAppShare } from "../../lib/shareWa";
 
@@ -152,4 +152,71 @@ export function StatusBadge({ status }) {
 
 export function QtyText({ qty, satuan }) {
   return <span>{fmtQty(qty)} {satuan}</span>;
+}
+
+/** Lampiran foto (kamera/galeri). files: File[]; onChange(File[]). */
+export function FotoPicker({ files, onChange, max = 4, hint = "Foto kulkas/rak/timbangan sebagai bukti." }) {
+  const [previews, setPreviews] = useState([]);
+  useEffect(() => {
+    const urls = (files || []).map((f) => URL.createObjectURL(f));
+    setPreviews(urls);
+    return () => urls.forEach((u) => URL.revokeObjectURL(u));
+  }, [files]);
+  const full = (files || []).length >= max;
+  return (
+    <div style={{ ...card, display: "grid", gap: 8 }}>
+      <span style={{ ...label, marginBottom: 0 }}>Lampiran foto ({(files || []).length}/{max})</span>
+      <div style={{ fontSize: 12, color: C.sub }}>{hint}</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {previews.map((u, i) => (
+          <div key={u} style={{ position: "relative" }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={u} alt={`Foto ${i + 1}`} style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 10, border: `1px solid ${C.line}` }} />
+            <button type="button" aria-label="Hapus foto" onClick={() => onChange(files.filter((_, j) => j !== i))}
+              style={{ position: "absolute", top: -6, right: -6, width: 22, height: 22, borderRadius: 999, border: "none", background: C.bad, color: "#fff", cursor: "pointer", display: "grid", placeItems: "center" }}>
+              <X size={12} />
+            </button>
+          </div>
+        ))}
+        {!full && (
+          <label style={{ width: 72, height: 72, borderRadius: 10, border: `1px dashed ${C.brand}`, display: "grid", placeItems: "center", cursor: "pointer", background: C.brandSoft }}>
+            <Camera size={22} color={C.brand} />
+            <input type="file" accept="image/*" multiple style={{ display: "none" }}
+              onChange={(e) => {
+                const picked = Array.from(e.target.files || []);
+                e.target.value = "";
+                onChange([...(files || []), ...picked].slice(0, max));
+              }} />
+          </label>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Panel tempel teks laporan WA. onApply(text). */
+export function PasteWaPanel({ onApply, busyLabel = "Isi otomatis" }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  if (!open) {
+    return (
+      <Btn kind="ghost" onClick={() => setOpen(true)}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><ClipboardPaste size={16} /> Tempel dari WA</span>
+      </Btn>
+    );
+  }
+  return (
+    <div style={{ ...card, display: "grid", gap: 8 }}>
+      <span style={{ ...label, marginBottom: 0 }}>Tempel laporan SO dari WhatsApp</span>
+      <div style={{ fontSize: 12, color: C.sub }}>
+        Salin pesan SO seperti biasa (mis. <i>Beras : 1,5 karung</i>, <i>Pakcoy : 1.5 Kg</i>), tempel di sini. Bagian <b>WASTE</b> otomatis masuk ke form waste.
+      </div>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={8} style={{ ...input, resize: "vertical", fontSize: 13 }}
+        placeholder={"*BAHAN*\nMie : 6.5 Kg\nBiji Wijen : -\n\n*WASTE*\nPakcoy : 200 gram"} />
+      <div style={{ display: "flex", gap: 8 }}>
+        <Btn kind="ghost" onClick={() => { setOpen(false); setText(""); }} style={{ flex: 1 }}>Batal</Btn>
+        <Btn onClick={() => { onApply(text); setOpen(false); setText(""); }} disabled={!text.trim()} style={{ flex: 2 }}>{busyLabel}</Btn>
+      </div>
+    </div>
+  );
 }

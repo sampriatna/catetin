@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import {
   LOKASI, LOKASI_LABEL, stockValueByLokasi, stockStatus, fmtRp, fmtQty, todayJakarta,
 } from "../../lib/inventoryLogic";
-import { deleteEvent } from "../../lib/inventoryRepo";
+import { deleteEvent, fotoUrls } from "../../lib/inventoryRepo";
 import { C, card, Notice, StatusBadge } from "./ui";
 
 const JENIS_LABEL = { so: "SO", waste: "Waste", produksi: "Produksi" };
@@ -26,7 +26,8 @@ export default function Ringkasan({ items, snapshot, events, lokasiScope, canDel
   const snap = useMemo(() => (snapshot || []).filter((r) => scope.includes(r.lokasi)), [snapshot, scope]);
   const values = useMemo(() => stockValueByLokasi(snap), [snap]);
   const alerts = useMemo(() => snap
-    .map((r) => ({ ...r, item: byId[r.item_id], status: stockStatus(r.qty, byId[r.item_id]?.min_stok) }))
+    // Status hanya bila SO tersimpan dalam satuan master (konversi sudah diatur).
+    .map((r) => ({ ...r, item: byId[r.item_id], status: (r.satuan || byId[r.item_id]?.satuan) === byId[r.item_id]?.satuan ? stockStatus(r.qty, byId[r.item_id]?.min_stok) : null }))
     .filter((r) => r.item && (r.status === "habis" || r.status === "menipis"))
     .sort((a, b) => (a.status === b.status ? a.item.nama.localeCompare(b.item.nama) : a.status === "habis" ? -1 : 1)),
   [snap, byId]);
@@ -95,17 +96,21 @@ export default function Ringkasan({ items, snapshot, events, lokasiScope, canDel
                 <span style={{ fontWeight: 700, fontSize: 14 }}>{JENIS_LABEL[ev.jenis]} · {ev.lokasi}{ev.shift ? ` · ${ev.shift}` : ""}</span>
                 <span style={{ fontWeight: 700, fontSize: 14 }}>{fmtRp(ev.total_nilai)}</span>
               </div>
-              <div style={{ fontSize: 12, color: C.sub }}>{ev.tanggal} · {ev.created_by_name || "—"} · {(ev.lines || []).length} baris</div>
+              <div style={{ fontSize: 12, color: C.sub }}>{ev.tanggal} · {ev.created_by_name || "—"} · {(ev.lines || []).length} baris{ev.foto?.length ? ` · 📷 ${ev.foto.length}` : ""}</div>
             </button>
             {openId === ev.id && (
               <div style={{ padding: "0 14px 12px", fontSize: 13 }}>
                 {(ev.lines || []).map((l, i) => (
                   <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 0" }}>
-                    <span>{l.arah === "masuk" ? "➕ " : l.arah === "keluar" && ev.jenis === "produksi" ? "➖ " : ""}{byId[l.item_id]?.nama || "?"}{l.alasan ? ` (${l.alasan})` : ""}</span>
-                    <span>{fmtQty(l.qty)} {l.satuan} · {fmtRp(l.nilai)}</span>
+                    <span>{l.arah === "masuk" ? "➕ " : l.arah === "keluar" && ev.jenis === "produksi" ? "➖ " : ""}{l.label || byId[l.item_id]?.nama || "?"}{l.alasan ? ` (${l.alasan})` : ""}</span>
+                    <span>
+                      {l.satuan_input && l.satuan_input !== l.satuan ? `${fmtQty(l.qty_input)} ${l.satuan_input} = ` : ""}
+                      {fmtQty(l.qty)} {l.satuan} · {fmtRp(l.nilai)}
+                    </span>
                   </div>
                 ))}
                 {ev.catatan && <div style={{ color: C.sub, marginTop: 6 }}>📝 {ev.catatan}</div>}
+                {ev.foto?.length > 0 && <FotoList paths={ev.foto} />}
                 {canDelete && (
                   <button type="button" disabled={busyId === ev.id} onClick={() => remove(ev)}
                     style={{ marginTop: 8, border: "none", background: C.badSoft, color: C.bad, borderRadius: 10, padding: "8px 12px", fontWeight: 700, cursor: "pointer" }}>
@@ -120,6 +125,29 @@ export default function Ringkasan({ items, snapshot, events, lokasiScope, canDel
           <div style={{ padding: "0 14px 14px", fontSize: 13, color: C.sub }}>Belum ada input.</div>
         )}
       </div>
+    </div>
+  );
+}
+
+function FotoList({ paths }) {
+  const [urls, setUrls] = useState(null);
+  const [err, setErr] = useState("");
+  if (!urls) {
+    return (
+      <button type="button" onClick={() => fotoUrls(paths).then(setUrls).catch((e) => setErr(e.message || String(e)))}
+        style={{ marginTop: 8, marginRight: 8, border: `1px solid ${C.line}`, background: "#fff", borderRadius: 10, padding: "8px 12px", fontWeight: 700, cursor: "pointer" }}>
+        📷 Lihat {paths.length} foto{err ? ` — gagal: ${err}` : ""}
+      </button>
+    );
+  }
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+      {urls.map((u, i) => (
+        <a key={u} href={u} target="_blank" rel="noreferrer">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={u} alt={`Foto ${i + 1}`} style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 10, border: `1px solid ${C.line}` }} />
+        </a>
+      ))}
     </div>
   );
 }

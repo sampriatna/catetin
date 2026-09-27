@@ -68,7 +68,7 @@ export default function ProduksiForm({ bizId, user, lokasi, items, recipes, snap
         bahan: bahan.map((b) => ({ nama: b.item.nama, satuan: b.item.satuan, qty: parseQty(b.qty), nilai: parseQty(b.qty) * (Number(b.item.harga) || 0) })),
         hasil: { nama: hasilItem.nama, satuan: hasilItem.satuan, qty: hq },
         total: res?.total_nilai ?? cost.total, perUnit,
-        stokHasil: lastSo ? round2(Number(lastSo.qty) + hq) : null,
+        stokHasil: lastSo && (lastSo.satuan || hasilItem.satuan) === hasilItem.satuan ? round2(Number(lastSo.qty) + hq) : null,
         catatan,
       });
       setDone({ text, perUnit, duplicate: !!res?.duplicate, nama: hasilItem.nama, satuan: hasilItem.satuan });

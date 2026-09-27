@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { LOKASI_LABEL, allowedLokasi, defaultLokasi, canManageMaster } from "../../lib/inventoryLogic";
-import { loadItems, loadRecipes, loadStockSnapshot, loadEvents } from "../../lib/inventoryRepo";
+import { loadItems, loadRecipes, loadStockSnapshot, loadEvents, loadSoTemplates } from "../../lib/inventoryRepo";
 import { C, Chips, Notice } from "./ui";
 import SoForm from "./SoForm";
 import WasteForm from "./WasteForm";
@@ -36,6 +36,8 @@ export default function DapurApp({ bizId, user }) {
   const [recipes, setRecipes] = useState([]);
   const [snapshot, setSnapshot] = useState([]);
   const [events, setEvents] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [wastePrefill, setWastePrefill] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
@@ -49,11 +51,13 @@ export default function DapurApp({ bizId, user }) {
     if (!bizId) return;
     setLoading(true); setErr("");
     try {
-      const [it, rc, sn, ev] = await Promise.all([
+      const [it, rc, sn, ev, tp] = await Promise.all([
         loadItems(bizId), loadRecipes(bizId), loadStockSnapshot(bizId),
         loadEvents(bizId, { lokasi: role === "kasir" ? lokasi : null, limit: 60 }),
+        // Daftar SO outlet opsional: kalau tabel belum dimigrasi, form tetap jalan pakai daftar bahan.
+        loadSoTemplates(bizId).catch(() => []),
       ]);
-      setItems(it); setRecipes(rc); setSnapshot(sn); setEvents(ev);
+      setItems(it); setRecipes(rc); setSnapshot(sn); setEvents(ev); setTemplates(tp);
     } catch (e) {
       setErr(e.message || String(e));
     } finally {
@@ -62,6 +66,7 @@ export default function DapurApp({ bizId, user }) {
   }, [bizId, role, lokasi]);
 
   useEffect(() => { reload(); }, [reload]);
+  const clearWastePrefill = useCallback(() => setWastePrefill(null), []);
 
   const lokasiScope = useMemo(() => (role === "kasir" ? lokasiOptions : ["GDG", "KBU", "KSM", "SMT"]), [role, lokasiOptions]);
 
@@ -101,14 +106,20 @@ export default function DapurApp({ bizId, user }) {
         <div style={{ padding: 30, textAlign: "center", color: C.sub }}>Memuat…</div>
       ) : (
         <>
-          {tab === "so" && <SoForm bizId={bizId} user={user} lokasi={lokasi} items={items} snapshot={snapshot} onSaved={reload} />}
-          {tab === "waste" && <WasteForm bizId={bizId} user={user} lokasi={lokasi} items={items} onSaved={reload} />}
+          {tab === "so" && (
+            <SoForm bizId={bizId} user={user} lokasi={lokasi} items={items} templates={templates} snapshot={snapshot} onSaved={reload}
+              onWasteFromWa={(w) => { setWastePrefill(w); setTab("waste"); }} />
+          )}
+          {tab === "waste" && (
+            <WasteForm bizId={bizId} user={user} lokasi={lokasi} items={items} prefill={wastePrefill}
+              onPrefillUsed={clearWastePrefill} onSaved={reload} />
+          )}
           {tab === "produksi" && <ProduksiForm bizId={bizId} user={user} lokasi={lokasi} items={items} recipes={recipes} snapshot={snapshot} onSaved={reload} />}
           {tab === "ringkasan" && (
             <Ringkasan items={items} snapshot={snapshot} events={events} lokasiScope={lokasiScope}
               canDelete={role === "owner" || role === "admin"} onChanged={reload} />
           )}
-          {tab === "kelola" && isManager && <KelolaBahan bizId={bizId} items={items} recipes={recipes} onChanged={reload} />}
+          {tab === "kelola" && isManager && <KelolaBahan bizId={bizId} items={items} recipes={recipes} templates={templates} onChanged={reload} />}
         </>
       )}
     </Shell>
