@@ -1869,6 +1869,16 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
               },
             },
           ];
+          if (features.isFnB) {
+            tasks.push({
+              id: "dapur",
+              title: "SO & Waste Dapur",
+              subtitle: "Hitung stok akhir shift + catat barang terbuang · laporan ke WA",
+              done: false,
+              optional: true,
+              onClick: () => { window.location.href = "/dapur"; },
+            });
+          }
           if (kasirSosmed) {
             tasks.push({
               id: "sosmed",
@@ -1909,6 +1919,14 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
               done: todayOutTx.length > 0,
               onClick: () => onCatat?.(),
             },
+            ...(features.isFnB ? [{
+              id: "dapur",
+              title: "Produksi & SO Gudang",
+              subtitle: "Catat produksi (modal otomatis), SO gudang, waste",
+              done: false,
+              optional: true,
+              onClick: () => { window.location.href = "/dapur"; },
+            }] : []),
             {
               id: "asisten",
               title: "Asisten Purchasing",
@@ -6006,6 +6024,9 @@ function PengaturanScreen({ s, mutate, onClose, setOverlay, setTab, bizId, authU
           )}
           {features?.purchasingModule && canDo(role, "kelolaKategoriSemua") && (
             <SRow icon={Tags} label="Alias Barang Purchasing" sub="Review & approve pengelompokan nama barang" onClick={() => setOverlay("purchasingAliases")} chev />
+          )}
+          {features?.isFnB && (
+            <SRow icon={ClipboardList} label="Dapur & Stok" sub="SO shift, waste, produksi, nilai stok per lokasi" onClick={() => { window.location.href = "/dapur"; }} chev />
           )}
           {features?.sosmedReports && canInputSosmed(s.currentUser || {}, s.sosmedConfig) && (role !== "kasir" || isSosmedEnabled(s.sosmedConfig, s.currentUser?.outlet)) && (
             <SRow icon={Smartphone} label="Daily Report Sosmed" sub={`${sosmedDisplayName(s.currentUser?.outlet || "KBU")} · isi laporan hari ini`} onClick={() => setOverlay("sosmedHarian")} chev />
