@@ -2,8 +2,8 @@
 // Modul Dapur: SO shift, waste, produksi, ringkasan stok, kelola bahan & resep.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, RefreshCw } from "lucide-react";
-import { LOKASI_LABEL, allowedLokasi, defaultLokasi, canManageMaster } from "../../lib/inventoryLogic";
+import { ArrowLeft, LogOut, RefreshCw } from "lucide-react";
+import { LOKASI_LABEL, allowedLokasi, defaultLokasi, canManageMaster, isOutletLocked } from "../../lib/inventoryLogic";
 import { loadItems, loadRecipes, loadStockSnapshot, loadEvents, loadSoTemplates } from "../../lib/inventoryRepo";
 import { C, Chips, Notice } from "./ui";
 import SoForm from "./SoForm";
@@ -26,7 +26,7 @@ function readTab() {
   try { return new URLSearchParams(window.location.search).get("tab"); } catch { return null; }
 }
 
-export default function DapurApp({ bizId, user }) {
+export default function DapurApp({ bizId, user, signOut }) {
   const role = user?.role || "kasir";
   const isManager = canManageMaster(role);
   const lokasiOptions = allowedLokasi(user);
@@ -55,7 +55,7 @@ export default function DapurApp({ bizId, user }) {
     try {
       const [it, rc, sn, ev, tp] = await Promise.all([
         loadItems(bizId), loadRecipes(bizId), loadStockSnapshot(bizId),
-        loadEvents(bizId, { lokasi: role === "kasir" ? lokasi : null, limit: 60 }),
+        loadEvents(bizId, { lokasi: isOutletLocked(role) ? lokasi : null, limit: 60 }),
         // Daftar SO outlet opsional: kalau tabel belum dimigrasi, form tetap jalan pakai daftar bahan.
         loadSoTemplates(bizId).catch(() => []),
       ]);
@@ -70,11 +70,13 @@ export default function DapurApp({ bizId, user }) {
   useEffect(() => { reload(); }, [reload]);
   const clearWastePrefill = useCallback(() => setWastePrefill(null), []);
 
-  const lokasiScope = useMemo(() => (role === "kasir" ? lokasiOptions : ["GDG", "KBU", "KSM", "SMT"]), [role, lokasiOptions]);
+  const lokasiScope = useMemo(() => (isOutletLocked(role) ? lokasiOptions : ["GDG", "KBU", "KSM", "SMT"]), [role, lokasiOptions]);
+  // Akun dapur hanya punya modul ini: tombol kembali diganti Keluar.
+  const onLogout = role === "dapur" ? signOut : null;
 
   if (!lokasi) {
     return (
-      <Shell>
+      <Shell onLogout={onLogout}>
         <Notice kind="warn">Akun Anda belum punya outlet. Minta owner/admin mengatur outlet di Kelola Staf.</Notice>
       </Shell>
     );
@@ -83,7 +85,7 @@ export default function DapurApp({ bizId, user }) {
   const needsLokasi = tab === "so" || tab === "waste" || tab === "produksi";
 
   return (
-    <Shell onReload={reload} loading={loading}>
+    <Shell onReload={reload} loading={loading} onLogout={onLogout}>
       <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4 }}>
         {tabs.map((t) => (
           <button key={t.id} type="button" onClick={() => setTab(t.id)}
@@ -119,7 +121,7 @@ export default function DapurApp({ bizId, user }) {
           {tab === "produksi" && <ProduksiForm bizId={bizId} user={user} lokasi={lokasi} items={items} recipes={recipes} snapshot={snapshot} onSaved={reload} />}
           {tab === "kirim" && <KirimStok bizId={bizId} user={user} items={items} templates={templates} onSaved={reload} />}
           {tab === "ringkasan" && (
-            <Ringkasan items={items} snapshot={snapshot} events={events} lokasiScope={lokasiScope}
+            <Ringkasan bizId={bizId} items={items} snapshot={snapshot} events={events} lokasiScope={lokasiScope}
               canDelete={role === "owner" || role === "admin"} onChanged={reload} />
           )}
           {tab === "kelola" && isManager && <KelolaBahan bizId={bizId} items={items} recipes={recipes} templates={templates} onChanged={reload} />}
@@ -129,14 +131,21 @@ export default function DapurApp({ bizId, user }) {
   );
 }
 
-function Shell({ children, onReload, loading }) {
+function Shell({ children, onReload, loading, onLogout }) {
   return (
     <div style={{ minHeight: "100vh", background: C.bg, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif", color: C.ink }}>
       <div style={{ maxWidth: 560, margin: "0 auto", padding: "12px 16px 60px", display: "grid", gap: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <a href="/dashboard" aria-label="Kembali" style={{ display: "grid", placeItems: "center", width: 38, height: 38, borderRadius: 12, background: "#fff", border: `1px solid ${C.line}` }}>
-            <ArrowLeft size={18} color={C.ink} />
-          </a>
+          {onLogout ? (
+            <button type="button" onClick={() => { if (window.confirm("Keluar dari akun ini?")) onLogout(); }} aria-label="Keluar"
+              style={{ display: "grid", placeItems: "center", width: 38, height: 38, borderRadius: 12, background: "#fff", border: `1px solid ${C.line}`, cursor: "pointer" }}>
+              <LogOut size={16} color={C.ink} />
+            </button>
+          ) : (
+            <a href="/dashboard" aria-label="Kembali" style={{ display: "grid", placeItems: "center", width: 38, height: 38, borderRadius: 12, background: "#fff", border: `1px solid ${C.line}` }}>
+              <ArrowLeft size={18} color={C.ink} />
+            </a>
+          )}
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 18, fontWeight: 800 }}>Dapur & Stok</div>
             <div style={{ fontSize: 12, color: C.sub }}>SO shift · waste · produksi · kirim stok</div>

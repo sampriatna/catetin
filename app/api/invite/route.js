@@ -56,10 +56,11 @@ export async function POST(req) {
       return Response.json({ error: "Hanya owner yang bisa mengundang staf." }, { status: 403 });
     }
 
-    if (role === "kasir" && !outlet) {
-      return Response.json({ error: "Kasir wajib outlet (KBU, KSM, atau SMT)." }, { status: 400 });
+    const outletRole = role === "kasir" || role === "dapur";
+    if (outletRole && !["KBU", "KSM", "SMT"].includes(String(outlet || "").toUpperCase())) {
+      return Response.json({ error: `${role === "dapur" ? "Dapur" : "Kasir"} wajib outlet (KBU, KSM, atau SMT).` }, { status: 400 });
     }
-    if (role !== "kasir" && outlet) {
+    if (!outletRole && outlet) {
       return Response.json({ error: "Purchasing dan Admin tidak pakai outlet — kosongkan outlet." }, { status: 400 });
     }
 
@@ -69,7 +70,7 @@ export async function POST(req) {
         business_id: businessId,
         email: email || null,
         role: role || "kasir",
-        outlet: role === "kasir" ? outlet : null,
+        outlet: outletRole ? String(outlet).toUpperCase() : null,
         invited_by: authData.user.id,
       })
       .select()

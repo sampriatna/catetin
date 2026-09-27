@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { Home, BarChart3, Sparkles, User, Mic, Bell, Inbox, Cloud, Eye, EyeOff, Plus, Wallet, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Pencil, Trash2, ShoppingCart, Users, Zap, Store, PiggyBank, MoreHorizontal, Check, X, ArrowLeft, ScanLine, Keyboard, Fingerprint, Star, ShieldCheck, Monitor, RefreshCw, Sun, Moon, Smartphone, Copy, AlertTriangle, ClipboardList, ClipboardPaste, TrendingUp, TrendingDown, Loader2, Banknote, Filter, Ban, Share2, LogOut, Tags, MessageCircle, ArrowLeftRight, Upload, Search } from "lucide-react";
 import KategoriPurchasing from "../../../components/KategoriPurchasing";
+const StockValueCard = dynamic(() => import("../../../components/dapur/StockValueCard"), { ssr: false });
 import LaporanPurchasing from "../../../components/LaporanPurchasing";
 import AsistenPurchasing from "../../../components/AsistenPurchasing";
 import NfBelanjaSearch from "../../../components/NfBelanjaSearch";
@@ -1481,6 +1482,14 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
           )}
         </div>
       </div>
+
+      {/* nilai stok (uang yang tertahan jadi barang) — owner & admin F&B */}
+      {features?.isFnB && (user.role === "owner" || user.role === "admin") && bizId && (
+        <div style={{ margin: "0 16px 20px" }}>
+          <StockValueCard bizId={bizId} saldo={totalSaldo} hide={hide}
+            onOpen={() => { window.location.href = "/dapur?tab=ringkasan"; }} />
+        </div>
+      )}
 
       {showNfOmzet && nfMonthChannels && (
         <NfChannelBreakdownCard

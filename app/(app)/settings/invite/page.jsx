@@ -11,6 +11,7 @@ import { isFnBBusiness } from "../../../../lib/businessFeatures";
 
 const ALL_ROLES = [
   { v: "kasir", l: "Kasir", d: "Catat pemasukan & pengeluaran outlet" },
+  { v: "dapur", l: "Dapur", d: "SO, waste, produksi & terima stok di outletnya — tanpa akses uang" },
   { v: "purchasing", l: "Purchasing", d: "Belanja / kas kecil" },
   { v: "admin", l: "Admin Keuangan", d: "Transfer antar kas, settle, kelola dompet (tanpa undang)" },
 ];
@@ -22,7 +23,7 @@ export default function InvitePage() {
   // Bisnis non-F&B (mis. NF Nusa Fishing) tidak pakai Kasir/outlet — sistemnya beda.
   const isFnb = isFnBBusiness(business);
   const roles = useMemo(
-    () => (isFnb ? ALL_ROLES : ALL_ROLES.filter((r) => r.v !== "kasir")),
+    () => (isFnb ? ALL_ROLES : ALL_ROLES.filter((r) => r.v !== "kasir" && r.v !== "dapur")),
     [isFnb]
   );
 
@@ -43,11 +44,11 @@ export default function InvitePage() {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (role === "kasir" && !outlet.trim()) {
-      setErr("Kasir wajib pilih outlet (KBU, KSM, atau SMT).");
+    if ((role === "kasir" || role === "dapur") && !outlet.trim()) {
+      setErr(`${role === "dapur" ? "Dapur" : "Kasir"} wajib pilih outlet (KBU, KSM, atau SMT).`);
       return;
     }
-    const outletForInvite = role === "kasir" || role === "purchasing" ? outlet.trim() || null : null;
+    const outletForInvite = role === "kasir" || role === "dapur" || role === "purchasing" ? outlet.trim() || null : null;
     setLoading(true); setErr(""); setResult(null);
     try {
       const inv = await inviteStaff({ email: email.trim() || null, role, outlet: outletForInvite });
@@ -61,7 +62,7 @@ export default function InvitePage() {
 
   const pickRole = (r) => {
     setRole(r);
-    if (r !== "kasir") setOutlet("");
+    if (r !== "kasir" && r !== "dapur") setOutlet("");
   };
 
   const link = result?.inviteUrl;
@@ -113,8 +114,8 @@ export default function InvitePage() {
               </div>
             </Field>
 
-            {role === "kasir" ? (
-              <Field label="Outlet (wajib untuk Kasir)">
+            {role === "kasir" || role === "dapur" ? (
+              <Field label={`Outlet (wajib untuk ${role === "dapur" ? "Dapur" : "Kasir"})`}>
                 <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
                   {["KBU", "KSM", "SMT"].map((o) => (
                     <button key={o} type="button" onClick={() => setOutlet(o)}

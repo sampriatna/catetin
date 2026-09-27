@@ -14,6 +14,7 @@ const ROLE_COLOR = {
   admin:      { bg: "#EEF2FF", text: "#4338CA" },
   kasir:      { bg: "#DCFCE7", text: "#15803D" },
   purchasing: { bg: "#FEF3C7", text: "#D97706" },
+  dapur:      { bg: "#FFEDD5", text: "#C2410C" },
 };
 const KASIR_OUTLETS = new Set(["KBU", "KSM", "SMT"]);
 const isPurchasingArea = (m) => m?.role === "purchasing" && !!m?.outlet && !KASIR_OUTLETS.has(String(m.outlet).toUpperCase());

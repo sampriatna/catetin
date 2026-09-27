@@ -4,12 +4,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  LOKASI, LOKASI_LABEL, TRANSFER_STATUS, allowedLokasi, canManageMaster, buildSoRows, buildTransferLines,
+  LOKASI, LOKASI_LABEL, TRANSFER_STATUS, allowedLokasi, canManageMaster, buildSoRows, buildTransferLines, rowsForArea, defaultArea, isOutletLocked,
   transferLineNilai, normSearch, parseQty, round2, makeClientRef, todayJakarta, formatTransferWa, fmtRp, fmtQty,
   parseWaStock, applyWaToRows,
 } from "../../lib/inventoryLogic";
 import { loadTransfers, saveTransfer, uploadFotos } from "../../lib/inventoryRepo";
-import { C, card, input, label, Btn, WaButton, Chips, Notice, SearchBox, ItemPicker, QtyInput, FotoPicker, PasteWaPanel } from "./ui";
+import { C, card, input, label, Btn, WaButton, Chips, Notice, SearchBox, ItemPicker, QtyInput, FotoPicker, PasteWaPanel, AreaChips } from "./ui";
 
 const STATUS_COLOR = {
   diminta: [C.warnSoft, C.warn],
@@ -175,7 +175,7 @@ function TransferCard({ t, itemsById, canKirim, canTerima, canBatal, onKirim, on
 
 function FormBaru({ bizId, user, action, items, templates, itemsById, onCancel, onDone }) {
   const role = user?.role || "kasir";
-  const tujuanOptions = (role === "kasir" ? allowedLokasi(user) : LOKASI).filter((l) => l !== "GDG");
+  const tujuanOptions = (isOutletLocked(role) ? allowedLokasi(user) : LOKASI).filter((l) => l !== "GDG");
   const [ke, setKe] = useState(tujuanOptions[0] || "KBU");
   const [tanggal, setTanggal] = useState(todayJakarta());
   const [catatan, setCatatan] = useState("");
@@ -189,8 +189,12 @@ function FormBaru({ bizId, user, action, items, templates, itemsById, onCancel, 
   const refId = useRef(makeClientRef(action));
 
   // Daftar barang = daftar SO outlet tujuan (nama & satuan yang dipakai staf), lalu barang lain di belakang.
-  const rows = useMemo(() => buildSoRows(items, templates, ke), [items, templates, ke]);
-  const key = `dapur:${action}:${bizId}:${ke}`;
+  const allRows = useMemo(() => buildSoRows(items, templates, ke), [items, templates, ke]);
+  const hasArea = allRows.some((r) => r.area);
+  const [area, setArea] = useState(() => defaultArea(user));
+  const effArea = hasArea ? area : null;
+  const rows = useMemo(() => rowsForArea(allRows, effArea), [allRows, effArea]);
+  const key = `dapur:${action}:${bizId}:${ke}:${effArea || "semua"}`;
   const [counts, setCounts] = useState({});
   useEffect(() => { setCounts(readDraft(key)?.counts || {}); }, [key]);
   useEffect(() => {
@@ -250,6 +254,12 @@ function FormBaru({ bizId, user, action, items, templates, itemsById, onCancel, 
             ? <Chips options={tujuanOptions} value={ke} onChange={setKe} getLabel={(l) => LOKASI_LABEL[l] || l} />
             : <div style={{ fontWeight: 800 }}>{LOKASI_LABEL[ke] || ke}</div>}
         </div>
+        {hasArea && (
+          <div>
+            <span style={label}>Daftar</span>
+            <AreaChips value={area} onChange={setArea} />
+          </div>
+        )}
         <div>
           <span style={label}>{action === "minta" ? "Tanggal butuh" : "Tanggal kirim"}</span>
           <input type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} style={input} />

@@ -15,9 +15,28 @@ Halaman: `/dapur` (tombol di checklist kasir & purchasing, dan Pengaturan → Da
 
 Setiap simpan menghasilkan teks laporan dan tombol **Kirim laporan ke WhatsApp**.
 
+## Akun (Nusa Food)
+
+| Akun | Role | Outlet | Isi daftar SO |
+|---|---|---|---|
+| Kasir KBU | kasir | KBU | Bar KBU (+ kasir/keuangan seperti biasa) |
+| Dapur KBU | **dapur** | KBU | Dapur KBU |
+| Kasir KSM | kasir | KSM | Minuman KSM |
+| Dapur KSM | **dapur** | KSM | Bahan, bumbu, topping, ala carte KSM |
+| Samtaro | kasir | SMT | Semua (satu akun) |
+| Purchasing | purchasing | — | Gudang: SO gudang, produksi, kirim stok |
+| Owner / Admin | owner / admin | — | Semua + kartu Nilai Stok di beranda |
+
+- Role **dapur** hanya membuka modul Dapur (beranda langsung ke `/dapur`, tanpa akses uang). Buat lewat Pengaturan → Staf → Undang → peran **Dapur** + outlet.
+- Area daftar SO (`inv_so_template.area`): `dapur`, `bar`, atau kosong (semua). Bisa diubah di Kelola → Daftar SO → "Dihitung oleh". Setiap akun tetap bisa pindah ke daftar lain lewat pilihan "Daftar".
+
+## Nilai stok
+
+Kartu **Nilai Stok** (beranda owner/admin & tab Stok & Riwayat): total dan per lokasi = SO terakhir tiap barang × modal saat ini, naik/turun vs kemarin & 7 hari lalu, grafik 14 hari, dan **Uang + Stok**. Barang dengan modal 0 atau konversi belum diisi dihitung Rp0 dan ditandai. Sumber: RPC `inv_stock_value_series`.
+
 ## Aturan
 
-- Kasir hanya bisa input untuk outletnya sendiri (dicek juga di database). Purchasing default Gudang (GDG).
+- Kasir dan dapur hanya bisa input untuk outletnya sendiri (dicek juga di database). Purchasing default Gudang (GDG).
 - Simpan lewat RPC `inv_submit_event` — atomik dan tidak dobel walau tombol ditekan dua kali (`client_ref`).
 - Konversi: `qty master = qty SO × isi`. kg↔gr dan L↔ml otomatis. Bila isi belum diatur, SO tetap tersimpan dalam satuan staf (mis. ml sirup) tetapi **nilainya Rp 0** dan tidak ikut alert, sampai isi diisi di Kelola → Daftar SO.
 - Setiap baris SO menyimpan juga angka & satuan asli yang ditulis staf (`qty_input`, `satuan_input`, `label`).
@@ -33,6 +52,7 @@ Setiap simpan menghasilkan teks laporan dan tombol **Kirim laporan ke WhatsApp**
 3. Jalankan `supabase/migrations/20260927120000_inventory_so_template.sql` (daftar SO outlet, kolom satuan asli, foto + bucket storage).
 4. Jalankan `supabase/seed/inventory_so_template_nusa_food.sql` — 152 baris daftar SO (KBU dapur+bar, KSM bahan/bumbu/topping/ala carte/minuman, SMT) dari laporan WA 26 Sep + jawaban owner soal konversi, dan 73 bahan/setengah jadi baru (modal 0, perlu diisi). Sisa konversi (ukuran botol sirup, Saori, sea salt) diisi purchasing di Kelola → Daftar SO lewat kolom "1 btl = … ml".
 5. Jalankan `supabase/migrations/20260928090000_inventory_transfer.sql` (tabel `inv_transfers`, `inv_transfer_lines`, RPC `inv_transfer_save`).
-6. Buat resep produksi di tab Kelola → Resep.
+6. Jalankan `supabase/migrations/20260928120000_inventory_dapur_roles.sql` (role `dapur`, area daftar SO, `inv_stock_value_series`) lalu `supabase/seed/inventory_so_area_nusa_food.sql`.
+7. Buat resep produksi di tab Kelola → Resep.
 
 Test logika: `npm run test:inventory`.

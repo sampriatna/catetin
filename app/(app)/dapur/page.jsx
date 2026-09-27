@@ -8,7 +8,7 @@ import { isFnBBusiness } from "../../../lib/businessFeatures";
 const DapurApp = dynamic(() => import("../../../components/dapur/DapurApp"), { ssr: false });
 
 export default function DapurPage() {
-  const { bizId, authUser, business, loading } = useApp();
+  const { bizId, authUser, business, loading, signOut } = useApp();
 
   if (loading || !bizId || !authUser) {
     return <div style={{ padding: 40, textAlign: "center", color: "#9CA3AF" }}>Memuat…</div>;
@@ -20,5 +20,5 @@ export default function DapurPage() {
       </div>
     );
   }
-  return <DapurApp bizId={bizId} user={authUser} />;
+  return <DapurApp bizId={bizId} user={authUser} signOut={signOut} />;
 }

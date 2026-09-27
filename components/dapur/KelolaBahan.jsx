@@ -268,6 +268,14 @@ function TemplateEditor({ bizId, row, lokasi, items, onDone, onCancel }) {
         Contoh: Beras dihitung per <b>karung</b>, master dalam <b>kg</b> → isi 25. Sirup dihitung <b>ml</b>, master <b>btl</b> → isi = 1/volume botol (botol 750 ml → 0,001333).
         Kalau satuan sama atau kg↔gr / L↔ml, isi boleh dikosongkan. Selama konversi belum ada, SO tetap tersimpan tapi tidak masuk nilai stok.
       </div>
+      <div>
+        <span style={label}>Dihitung oleh</span>
+        <select style={input} value={f.area || ""} onChange={(e) => set("area", e.target.value || null)}>
+          <option value="">Semua akun outlet ini</option>
+          <option value="dapur">Akun Dapur</option>
+          <option value="bar">Akun Kasir / Bar</option>
+        </select>
+      </div>
       <div><span style={label}>Catatan</span><input style={input} value={f.catatan || ""} onChange={(e) => set("catatan", e.target.value)} /></div>
       <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
         <input type="checkbox" checked={f.aktif !== false} onChange={(e) => set("aktif", e.target.checked)} /> Aktif (tampil di form SO)
@@ -324,7 +332,7 @@ function DaftarSo({ bizId, items, templates, onChanged }) {
             style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", border: "none", borderBottom: `1px solid ${C.line}`, background: t.aktif === false ? C.bg : "#fff", cursor: "pointer" }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
               <span style={{ fontWeight: 700, fontSize: 14 }}>{t.label}{t.aktif === false ? " (nonaktif)" : ""}</span>
-              <span style={{ fontSize: 12, color: C.sub }}>{t.grup}</span>
+              <span style={{ fontSize: 12, color: C.sub }}>{t.grup}{t.area ? ` · ${t.area === "dapur" ? "Dapur" : "Bar"}` : ""}</span>
             </div>
             <div style={{ fontSize: 12, color: t.factor === null ? C.warn : C.sub }}>
               {t.item.nama} · hitung per {t.satuan_so} ·{" "}

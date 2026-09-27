@@ -220,3 +220,10 @@ export function PasteWaPanel({ onApply, busyLabel = "Isi otomatis" }) {
     </div>
   );
 }
+
+/** Pilih area daftar SO: Semua / Dapur / Bar (nilai null = semua). */
+export function AreaChips({ value, onChange }) {
+  const opts = ["semua", "dapur", "bar"];
+  const lbl = { semua: "Semua", dapur: "Dapur", bar: "Bar / Kasir" };
+  return <Chips options={opts} value={value || "semua"} onChange={(v) => onChange(v === "semua" ? null : v)} getLabel={(o) => lbl[o]} />;
+}

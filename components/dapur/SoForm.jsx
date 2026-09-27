@@ -3,15 +3,15 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  SHIFTS, buildSoRows, buildSoLinesFromRows, soToItemQty, itemToSoQty, rowFactor, normSearch, parseQty,
+  SHIFTS, buildSoRows, rowsForArea, defaultArea, buildSoLinesFromRows, soToItemQty, itemToSoQty, rowFactor, normSearch, parseQty,
   stockStatus, soDelta, round2, makeClientRef, todayJakarta, formatSoWa, fmtRp, fmtQty,
   parseWaStock, applyWaToRows, wasteFromWa,
 } from "../../lib/inventoryLogic";
 import { submitEvent, uploadFotos } from "../../lib/inventoryRepo";
-import { C, card, input, label, Btn, WaButton, Chips, Notice, SearchBox, QtyInput, StatusBadge, FotoPicker, PasteWaPanel } from "./ui";
+import { C, card, input, label, Btn, WaButton, Chips, Notice, SearchBox, QtyInput, StatusBadge, FotoPicker, PasteWaPanel, AreaChips } from "./ui";
 
-function draftKey(bizId, lokasi) {
-  return `dapur:so2:${bizId}:${lokasi}`;
+function draftKey(bizId, lokasi, area) {
+  return `dapur:so2:${bizId}:${lokasi}:${area || "semua"}`;
 }
 function readDraft(key) {
   try { return JSON.parse(localStorage.getItem(key) || "null"); } catch { return null; }
@@ -21,7 +21,12 @@ function writeDraft(key, v) {
 }
 
 export default function SoForm({ bizId, user, lokasi, items, templates, snapshot, onSaved, onWasteFromWa }) {
-  const rows = useMemo(() => buildSoRows(items, templates, lokasi), [items, templates, lokasi]);
+  const allRows = useMemo(() => buildSoRows(items, templates, lokasi), [items, templates, lokasi]);
+  // Daftar dibagi per area (dapur / bar) bila outlet punya akun terpisah; Samtaro tanpa area = satu daftar.
+  const hasArea = allRows.some((r) => r.area);
+  const [area, setArea] = useState(() => defaultArea(user));
+  const effArea = hasArea ? area : null;
+  const rows = useMemo(() => rowsForArea(allRows, effArea), [allRows, effArea]);
   const hasTemplate = rows.some((r) => r.template);
   const lastByItem = useMemo(() => {
     const m = {};
@@ -29,7 +34,7 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
     return m;
   }, [snapshot, lokasi]);
 
-  const key = draftKey(bizId, lokasi);
+  const key = draftKey(bizId, lokasi, effArea);
   const [counts, setCounts] = useState({});
   const [shift, setShift] = useState("Tutup");
   const [tanggal, setTanggal] = useState(todayJakarta());
@@ -146,7 +151,7 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
         };
       });
       total = round2(total);
-      const text = formatSoWa({ lokasi, tanggal, shift, by: user?.name, lines: waLines, total, catatan, foto: foto.length, belumKonversi, tambahan });
+      const text = formatSoWa({ lokasi, tanggal, shift, by: user?.name, lines: waLines, total, catatan, foto: foto.length, belumKonversi, tambahan, area: effArea });
       setDone({ text, total, count: lines.length, duplicate: !!res?.duplicate });
       setCounts({});
       setCatatan("");
@@ -183,6 +188,12 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <div style={{ ...card, display: "grid", gap: 10 }}>
+        {hasArea && (
+          <div>
+            <span style={label}>Daftar</span>
+            <AreaChips value={area} onChange={setArea} />
+          </div>
+        )}
         <div>
           <span style={label}>Shift</span>
           <Chips options={SHIFTS} value={shift} onChange={setShift} />

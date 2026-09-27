@@ -7,6 +7,7 @@ import {
 } from "../../lib/inventoryLogic";
 import { deleteEvent, fotoUrls } from "../../lib/inventoryRepo";
 import { C, card, Notice, StatusBadge } from "./ui";
+import StockValueCard from "./StockValueCard";
 
 const JENIS_LABEL = { so: "SO", waste: "Waste", produksi: "Produksi" };
 
@@ -16,7 +17,7 @@ function daysAgo(dateStr, n) {
   return d.toISOString().slice(0, 10);
 }
 
-export default function Ringkasan({ items, snapshot, events, lokasiScope, canDelete, onChanged }) {
+export default function Ringkasan({ bizId, items, snapshot, events, lokasiScope, canDelete, onChanged }) {
   const [openId, setOpenId] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [err, setErr] = useState("");
@@ -50,8 +51,9 @@ export default function Ringkasan({ items, snapshot, events, lokasiScope, canDel
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
+      {bizId && <StockValueCard bizId={bizId} lokasiScope={scope} />}
       <div style={card}>
-        <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Nilai stok (modal yang tertahan)</div>
+        <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Nilai stok & waste 7 hari</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           {scope.map((l) => (
             <div key={l} style={{ background: C.bg, borderRadius: 10, padding: 10 }}>

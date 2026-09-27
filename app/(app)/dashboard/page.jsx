@@ -30,6 +30,16 @@ function DashboardInner() {
     );
   }
 
+  // Akun dapur tidak memakai modul keuangan — langsung ke modul Dapur.
+  if (ctx.authUser.role === "dapur") {
+    if (typeof window !== "undefined") window.location.replace("/dapur");
+    return (
+      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "#F0F0F8", color: "#6B7280" }}>
+        Membuka Dapur…
+      </div>
+    );
+  }
+
   return (
     <NF3App
       bizId={ctx.bizId}
