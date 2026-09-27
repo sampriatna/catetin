@@ -5,9 +5,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, LogOut, RefreshCw } from "lucide-react";
 import { LOKASI_LABEL, allowedLokasi, defaultLokasi, canManageMaster, isOutletLocked } from "../../lib/inventoryLogic";
 import { loadItems, loadRecipes, loadStockSnapshot, loadEvents, loadSoTemplates } from "../../lib/inventoryRepo";
-import { C, Chips, Notice } from "./ui";
+import { C, Notice } from "./ui";
 import SoForm from "./SoForm";
-import WasteForm from "./WasteForm";
+import GerakForm from "./GerakForm";
+import AuditStok from "./AuditStok";
 import ProduksiForm from "./ProduksiForm";
 import Ringkasan from "./Ringkasan";
 import KelolaBahan from "./KelolaBahan";
@@ -18,8 +19,10 @@ const TABS = [
   { id: "hari", label: "Hari Ini" },
   { id: "so", label: "SO Shift" },
   { id: "waste", label: "Waste" },
+  { id: "masuk", label: "Barang Masuk" },
   { id: "produksi", label: "Produksi" },
   { id: "kirim", label: "Kirim Stok" },
+  { id: "audit", label: "Audit", owner: true },
   { id: "ringkasan", label: "Stok & Riwayat" },
   { id: "kelola", label: "Kelola", manager: true },
 ];
@@ -32,7 +35,8 @@ export default function DapurApp({ bizId, user, signOut }) {
   const role = user?.role || "kasir";
   const isManager = canManageMaster(role);
   const lokasiOptions = allowedLokasi(user);
-  const tabs = TABS.filter((t) => !t.manager || isManager);
+  const isOwner = role === "owner" || role === "admin";
+  const tabs = TABS.filter((t) => (!t.manager || isManager) && (!t.owner || isOwner));
 
   const [tab, setTab] = useState("hari");
   const [lokasi, setLokasi] = useState(defaultLokasi(user));
@@ -84,7 +88,7 @@ export default function DapurApp({ bizId, user, signOut }) {
     );
   }
 
-  const needsLokasi = tab === "so" || tab === "waste" || tab === "produksi";
+  const needsLokasi = tab === "so" || tab === "waste" || tab === "masuk" || tab === "produksi";
 
   return (
     <Shell onReload={reload} loading={loading} onLogout={onLogout}>
@@ -101,9 +105,17 @@ export default function DapurApp({ bizId, user, signOut }) {
       {needsLokasi && (
         <div style={{ background: "#fff", borderRadius: 14, border: `1px solid ${C.line}`, padding: 12 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: C.sub, marginBottom: 6 }}>Lokasi</div>
-          {lokasiOptions.length > 1
-            ? <Chips options={lokasiOptions} value={lokasi} onChange={setLokasi} getLabel={(l) => LOKASI_LABEL[l] || l} />
-            : <div style={{ fontWeight: 800 }}>{LOKASI_LABEL[lokasi] || lokasi}</div>}
+          {lokasiOptions.length > 1 ? (
+            <div style={{ display: "flex", gap: 6, overflowX: "auto" }}>
+              {lokasiOptions.map((l) => (
+                <button key={l} type="button" onClick={() => setLokasi(l)}
+                  style={{ flex: "0 0 auto", padding: "8px 12px", borderRadius: 999, fontSize: 13, fontWeight: 800, cursor: "pointer",
+                    border: `1px solid ${l === lokasi ? C.brand : C.line}`, background: l === lokasi ? C.brand : "#fff", color: l === lokasi ? "#fff" : C.ink }}>
+                  {LOKASI_LABEL[l] || l}
+                </button>
+              ))}
+            </div>
+          ) : <div style={{ fontWeight: 800 }}>{LOKASI_LABEL[lokasi] || lokasi}</div>}
         </div>
       )}
 
@@ -121,9 +133,13 @@ export default function DapurApp({ bizId, user, signOut }) {
               onWasteFromWa={(w) => { setWastePrefill(w); setTab("waste"); }} />
           )}
           {tab === "waste" && (
-            <WasteForm bizId={bizId} user={user} lokasi={lokasi} items={items} prefill={wastePrefill}
+            <GerakForm mode="waste" bizId={bizId} user={user} lokasi={lokasi} items={items} templates={templates} prefill={wastePrefill}
               onPrefillUsed={clearWastePrefill} onSaved={reload} />
           )}
+          {tab === "masuk" && (
+            <GerakForm key={`masuk-${lokasi}`} mode="masuk" bizId={bizId} user={user} lokasi={lokasi} items={items} templates={templates} onSaved={reload} />
+          )}
+          {tab === "audit" && isOwner && <AuditStok bizId={bizId} items={items} />}
           {tab === "produksi" && <ProduksiForm bizId={bizId} user={user} lokasi={lokasi} items={items} recipes={recipes} snapshot={snapshot} onSaved={reload} />}
           {tab === "kirim" && <KirimStok bizId={bizId} user={user} items={items} templates={templates} onSaved={reload} />}
           {tab === "ringkasan" && (

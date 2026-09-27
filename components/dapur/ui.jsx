@@ -24,9 +24,15 @@ export const C = {
 
 export const card = { background: C.card, borderRadius: 14, border: `1px solid ${C.line}`, padding: 14 };
 export const input = {
-  width: "100%", padding: "11px 12px", borderRadius: 10, border: `1px solid ${C.line}`,
+  width: "100%", maxWidth: "100%", minWidth: 0, display: "block", padding: "11px 12px", borderRadius: 10, border: `1px solid ${C.line}`,
   fontSize: 15, color: C.ink, background: "#fff", outline: "none", boxSizing: "border-box",
+  WebkitAppearance: "none", appearance: "none",
 };
+// Input tanggal di iPhone punya lebar bawaan yang bisa keluar dari kartu.
+export const dateInput = { ...input, textAlign: "left", minHeight: 44 };
+// Dropdown tetap memakai panah bawaan.
+export const selectInput = { ...input, WebkitAppearance: "menulist", appearance: "auto" };
+export const unitLabel = (u) => (u === "l" ? "L" : u);
 export const label = { fontSize: 12, fontWeight: 700, color: C.sub, marginBottom: 6, display: "block" };
 
 export function Btn({ children, onClick, kind = "primary", disabled, style, type = "button" }) {

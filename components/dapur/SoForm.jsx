@@ -8,7 +8,7 @@ import {
   parseWaStock, applyWaToRows, wasteFromWa,
 } from "../../lib/inventoryLogic";
 import { submitEvent, uploadFotos } from "../../lib/inventoryRepo";
-import { C, card, input, label, Btn, WaButton, Chips, Notice, SearchBox, QtyInput, StatusBadge, FotoPicker, PasteWaPanel, AreaChips } from "./ui";
+import { C, card, input, label, Btn, WaButton, Chips, Notice, SearchBox, QtyInput, StatusBadge, FotoPicker, PasteWaPanel, AreaChips, dateInput } from "./ui";
 
 function draftKey(bizId, lokasi, area) {
   return `dapur:so2:${bizId}:${lokasi}:${area || "semua"}`;
@@ -132,7 +132,7 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
       const catatanFull = [catatan.trim(), tambahan.length ? `Tambahan (belum di daftar): ${tambahan.map((x) => `${x.nama} ${x.qty} ${x.satuan}`.trim()).join("; ")}` : ""]
         .filter(Boolean).join("\n");
       const res = await submitEvent(bizId, {
-        client_ref: refId.current, jenis: "so", lokasi, tanggal, shift, catatan: catatanFull, created_by_name: user?.name, foto,
+        client_ref: refId.current, jenis: "so", lokasi, tanggal, shift, catatan: catatanFull, created_by_name: user?.name, foto, area: effArea,
       }, payload);
       // Urut sesuai form (grup), pakai nama & satuan staf.
       const filledRows = rows.filter((r) => { const v = parseQty(counts[r.key]); return v !== null && !Number.isNaN(v); });
@@ -200,7 +200,7 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
         </div>
         <div>
           <span style={label}>Tanggal</span>
-          <input type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} style={input} />
+          <input type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} style={dateInput} />
         </div>
       </div>
 
@@ -243,7 +243,7 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
           const st = stockStatus(curItem ?? (last && (last.satuan || it.satuan) === it.satuan ? last.qty : null), it.min_stok);
           const lastSo = last ? itemToSoQty(r, last.qty, last.satuan || it.satuan) : null;
           const d = curOk ? soDelta(lastSo, cur) : null;
-          const showHead = grup === "Semua" && hasTemplate && (idx === 0 || visible[idx - 1].grup !== r.grup);
+          const showHead = grup === "Semua" && (idx === 0 || visible[idx - 1].grup !== r.grup);
           return (
             <div key={r.key}>
               {showHead && <div style={{ padding: "8px 12px", background: C.bg, fontSize: 12, fontWeight: 800, color: C.sub, textTransform: "uppercase" }}>{r.grup}</div>}

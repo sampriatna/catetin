@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { LOKASI, LOKASI_LABEL, TIPE_LABEL, searchItems, normSearch, rowFactor, fmtRp, fmtQty } from "../../lib/inventoryLogic";
 import { saveItem, saveRecipe, saveSoTemplate } from "../../lib/inventoryRepo";
-import { C, card, input, label, Btn, Chips, Notice, SearchBox, ItemPicker, QtyInput } from "./ui";
+import { C, card, input, label, Btn, Chips, Notice, SearchBox, ItemPicker, QtyInput, selectInput } from "./ui";
 
 const EMPTY_ITEM = { kode: "", nama: "", kategori: "", tipe: "bahan", satuan: "pcs", harga: "", lokasi: [], min_stok: "", aktif: true, catatan: "" };
 
@@ -29,7 +29,7 @@ function ItemEditor({ bizId, item, onDone, onCancel }) {
         <div><span style={label}>Kategori</span><input style={input} value={f.kategori || ""} onChange={(e) => set("kategori", e.target.value)} /></div>
         <div>
           <span style={label}>Tipe</span>
-          <select style={input} value={f.tipe} onChange={(e) => set("tipe", e.target.value)}>
+          <select style={selectInput} value={f.tipe} onChange={(e) => set("tipe", e.target.value)}>
             {Object.entries(TIPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
         </div>
@@ -164,7 +164,7 @@ export default function KelolaBahan({ bizId, items, recipes, templates, onChange
           <Btn kind="ghost" onClick={() => setEditing({})}>+ Tambah bahan</Btn>
           <div style={{ ...card, display: "grid", gap: 8 }}>
             <SearchBox value={q} onChange={setQ} />
-            <select style={input} value={tipe} onChange={(e) => setTipe(e.target.value)}>
+            <select style={selectInput} value={tipe} onChange={(e) => setTipe(e.target.value)}>
               <option value="all">Semua tipe</option>
               {Object.entries(TIPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               <option value="cek">Perlu dicek (harga 0 / catatan cek)</option>
@@ -270,7 +270,7 @@ function TemplateEditor({ bizId, row, lokasi, items, onDone, onCancel }) {
       </div>
       <div>
         <span style={label}>Dihitung oleh</span>
-        <select style={input} value={f.area || ""} onChange={(e) => set("area", e.target.value || null)}>
+        <select style={selectInput} value={f.area || ""} onChange={(e) => set("area", e.target.value || null)}>
           <option value="">Semua akun outlet ini</option>
           <option value="dapur">Akun Dapur</option>
           <option value="bar">Akun Kasir / Bar</option>

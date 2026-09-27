@@ -9,7 +9,7 @@ import { deleteEvent, fotoUrls } from "../../lib/inventoryRepo";
 import { C, card, Notice, StatusBadge } from "./ui";
 import StockValueCard from "./StockValueCard";
 
-const JENIS_LABEL = { so: "SO", waste: "Waste", produksi: "Produksi" };
+const JENIS_LABEL = { so: "SO", waste: "Waste", produksi: "Produksi", masuk: "Barang Masuk" };
 
 function daysAgo(dateStr, n) {
   const d = new Date(`${dateStr}T00:00:00Z`);

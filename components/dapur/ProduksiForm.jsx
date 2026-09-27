@@ -7,7 +7,7 @@ import {
   parseQty, scaleRecipe, productionCost, makeClientRef, todayJakarta, formatProduksiWa, fmtRp, fmtQty, round2,
 } from "../../lib/inventoryLogic";
 import { submitEvent } from "../../lib/inventoryRepo";
-import { C, card, input, label, Btn, WaButton, Notice, ItemPicker, QtyInput } from "./ui";
+import { C, card, input, label, Btn, WaButton, Notice, ItemPicker, QtyInput, dateInput, selectInput } from "./ui";
 
 export default function ProduksiForm({ bizId, user, lokasi, items, recipes, snapshot, onSaved }) {
   const active = useMemo(() => (items || []).filter((i) => i.aktif !== false), [items]);
@@ -100,7 +100,7 @@ export default function ProduksiForm({ bizId, user, lokasi, items, recipes, snap
       <div style={{ ...card, display: "grid", gap: 10 }}>
         <div>
           <span style={label}>Resep</span>
-          <select value={recipeId} style={input}
+          <select value={recipeId} style={selectInput}
             onChange={(e) => {
               const id = e.target.value;
               setRecipeId(id);
@@ -122,7 +122,7 @@ export default function ProduksiForm({ bizId, user, lokasi, items, recipes, snap
         )}
         <div>
           <span style={label}>Tanggal</span>
-          <input type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} style={input} />
+          <input type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} style={dateInput} />
         </div>
       </div>
 
