@@ -4,6 +4,8 @@ import dynamic from "next/dynamic";
 import { Home, BarChart3, Sparkles, User, Mic, Bell, Inbox, Cloud, Eye, EyeOff, Plus, Wallet, ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Pencil, Trash2, ShoppingCart, Users, Zap, Store, PiggyBank, MoreHorizontal, Check, X, ArrowLeft, ScanLine, Keyboard, Fingerprint, Star, ShieldCheck, Monitor, RefreshCw, Sun, Moon, Smartphone, Copy, AlertTriangle, ClipboardList, ClipboardPaste, TrendingUp, TrendingDown, Loader2, Banknote, Filter, Ban, Share2, LogOut, Tags, MessageCircle, ArrowLeftRight, Upload, Search } from "lucide-react";
 import KategoriPurchasing from "../../../components/KategoriPurchasing";
 const StockValueCard = dynamic(() => import("../../../components/dapur/StockValueCard"), { ssr: false });
+import useDapurToday from "../../../components/dapur/useDapurToday";
+import { fmtJam } from "../../../lib/inventoryLogic";
 import LaporanPurchasing from "../../../components/LaporanPurchasing";
 import AsistenPurchasing from "../../../components/AsistenPurchasing";
 import NfBelanjaSearch from "../../../components/NfBelanjaSearch";
@@ -1237,6 +1239,14 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
   const prefix = today().slice(0, 7);
   const user = s.currentUser || { role: "kasir" };
   const myWallets = useMemo(() => visibleWalletsForBusiness(s.wallets, user, business), [s.wallets, user, business]);
+  // Status SO / kiriman stok hari ini untuk checklist (kasir = outletnya, purchasing = gudang).
+  const dapurLokasi = user.role === "kasir" ? String(user.outlet || "").toUpperCase() : user.role === "purchasing" ? "GDG" : null;
+  const dapurToday = useDapurToday({
+    bizId,
+    lokasi: dapurLokasi,
+    userId: session?.user?.id || user.id || null,
+    enabled: !!features?.isFnB && !!dapurLokasi,
+  });
   const purchasingArea = user.role === "purchasing" && user.outlet && !["KBU", "KSM", "SMT"].includes(user.outlet)
     ? String(user.outlet)
     : "";
@@ -1879,20 +1889,28 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
             },
           ];
           if (features.isFnB) {
+            // SO stok akhir shift = laporan wajib seperti omset & sosmed (kasir KBU/KSM = bar/minuman, Samtaro = semua).
             tasks.push({
               id: "dapur",
-              title: "SO & Waste Dapur",
-              subtitle: "Hitung stok akhir shift + catat barang terbuang · laporan ke WA",
-              done: false,
-              optional: true,
-              onClick: () => { window.location.href = "/dapur"; },
+              title: "SO Stok Akhir Shift",
+              subtitle: dapurToday?.soMine
+                ? `Terkirim ${fmtJam(dapurToday.soMineAt)}${dapurToday.wasteCount ? ` · ${dapurToday.wasteCount} waste` : ""} · tap untuk SO lagi`
+                : "Hitung stok sebelum tutup (bisa tempel dari WA) + waste · laporan ke WA",
+              done: !!dapurToday?.soMine,
+              onClick: () => { window.location.href = "/dapur?tab=so"; },
             });
             tasks.push({
               id: "kirimstok",
-              title: "Permintaan & Terima Stok",
-              subtitle: "Minta barang ke gudang, cek & terima kiriman yang datang",
+              title: dapurToday?.kirimanMasuk ? `Terima Kiriman Gudang (${dapurToday.kirimanMasuk})` : "Permintaan & Terima Stok",
+              subtitle: dapurToday?.kirimanMasuk
+                ? "Barang dari gudang sudah dikirim — cek jumlahnya lalu terima"
+                : dapurToday?.permintaanMenunggu
+                  ? `${dapurToday.permintaanMenunggu} permintaan menunggu dikirim gudang`
+                  : "Minta barang ke gudang, cek & terima kiriman yang datang",
               done: false,
-              optional: true,
+              optional: !dapurToday?.kirimanMasuk,
+              urgent: !!dapurToday?.kirimanMasuk,
+              actionLabel: dapurToday?.kirimanMasuk ? "Cek & terima" : null,
               onClick: () => { window.location.href = "/dapur?tab=kirim"; },
             });
           }
@@ -1938,17 +1956,24 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
             },
             ...(features.isFnB ? [{
               id: "dapur",
-              title: "Produksi & SO Gudang",
-              subtitle: "Catat produksi (modal otomatis), SO gudang, waste",
-              done: false,
-              optional: true,
-              onClick: () => { window.location.href = "/dapur"; },
+              title: "SO Gudang",
+              subtitle: dapurToday?.soMine
+                ? `Terkirim ${fmtJam(dapurToday.soMineAt)}${dapurToday.produksiCount ? ` · ${dapurToday.produksiCount} produksi hari ini` : ""}`
+                : `Hitung stok gudang${dapurToday?.produksiCount ? ` · ${dapurToday.produksiCount} produksi hari ini` : " · catat produksi (modal otomatis)"}`,
+              done: !!dapurToday?.soMine,
+              onClick: () => { window.location.href = "/dapur?tab=so"; },
             }, {
               id: "kirimstok",
-              title: "Kirim Stok ke Outlet",
-              subtitle: "Proses permintaan outlet, catat kiriman gudang → outlet",
+              title: dapurToday?.permintaanMenunggu ? `Permintaan Outlet (${dapurToday.permintaanMenunggu})` : "Kirim Stok ke Outlet",
+              subtitle: dapurToday?.permintaanMenunggu
+                ? "Outlet minta barang — isi jumlah yang dikirim"
+                : dapurToday?.kirimanMasuk
+                  ? `${dapurToday.kirimanMasuk} kiriman belum diterima outlet`
+                  : "Proses permintaan outlet, catat kiriman gudang → outlet",
               done: false,
-              optional: true,
+              optional: !dapurToday?.permintaanMenunggu,
+              urgent: !!dapurToday?.permintaanMenunggu,
+              actionLabel: dapurToday?.permintaanMenunggu ? "Proses kirim" : null,
               onClick: () => { window.location.href = "/dapur?tab=kirim"; },
             }] : []),
             {

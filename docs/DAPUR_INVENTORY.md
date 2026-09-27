@@ -6,6 +6,7 @@ Halaman: `/dapur` (tombol di checklist kasir & purchasing, dan Pengaturan → Da
 
 | Tab | Siapa | Isi |
 |---|---|---|
+| Hari Ini | semua (halaman pertama) | Daftar kerja hari ini untuk lokasinya: SO akhir shift (✓ + jam), terima kiriman gudang, permintaan, waste, produksi, bahan menipis. Gudang: permintaan outlet menunggu. Owner/admin: status SO semua lokasi + nilai stok. |
 | SO Shift | semua | Hitung stok fisik memakai **daftar SO outlet** (nama, grup, dan satuan persis seperti laporan WA staf: "Beras … karung", "Pakcoy … Kg", "Gyoza … porsi"), otomatis dikonversi ke satuan master. Tombol **Tempel dari WA** mengisi form dari pesan SO biasa; bagian *WASTE* langsung dibawa ke form Waste, bagian *Menipis/Limit* jadi catatan. Bisa lampirkan foto. Isian tersimpan otomatis di HP sampai dikirim. |
 | Waste | semua | Pilih bahan + jumlah + alasan (basi, jatuh, salah masak, sisa, rusak, lainnya) + foto bukti. Nilai rupiah otomatis. |
 | Produksi | semua (biasanya purchasing/gudang) | Pilih resep + jumlah batch → bahan terpakai terisi otomatis (bisa dikoreksi). Isi hasil aktual. Modal per satuan hasil = total nilai bahan ÷ hasil, dan otomatis jadi modal baru barang setengah jadi itu. |
@@ -29,6 +30,16 @@ Setiap simpan menghasilkan teks laporan dan tombol **Kirim laporan ke WhatsApp**
 
 - Role **dapur** hanya membuka modul Dapur (beranda langsung ke `/dapur`, tanpa akses uang). Buat lewat Pengaturan → Staf → Undang → peran **Dapur** + outlet.
 - Area daftar SO (`inv_so_template.area`): `dapur`, `bar`, atau kosong (semua). Bisa diubah di Kelola → Daftar SO → "Dihitung oleh". Setiap akun tetap bisa pindah ke daftar lain lewat pilihan "Daftar".
+
+## Checklist beranda
+
+- **Kasir** (bar KBU, minuman KSM, Samtaro): tugas wajib **SO Stok Akhir Shift** di checklist harian bersama omset/SDM/sosmed. Selesai (✓) setelah akun itu mengirim SO hari ini. **Terima Kiriman Gudang** jadi mendesak kalau ada kiriman yang belum dicek.
+- **Purchasing (gudang)**: **SO Gudang** dan **Permintaan Outlet (n)**, mendesak kalau ada permintaan menunggu.
+- **Akun dapur**: langsung ke `/dapur` → Hari Ini (tanpa saldo).
+
+## Resep produksi
+
+`supabase/seed/inventory_recipes_kisamen.sql` membuat 30 resep dari sheet HPP Kisamen (Bahan Olahan Produksi): dimsum, gyoza, udang keju, dimsum goreng, bumbu Paitan/Shoyu/Madara/Hashirama/Tantamen/Atomic/Miso/Spicy, chili oil, ajitama, karage, cornmilk, ubee, tare, minyak daun bawang, saus-saus, sea salt foam, caramel, topping beef. Bahan yang belum ada dibuat dari Master Bahan Gudang sheet yang sama. Qty resep dikonversi ke satuan master (kecap ABC 1 drigen = 6 L, garam 1 pcs = 250 gr, telur 1 pcs ≈ 60 gr, minyak wijen 1 btl = 620 ml, kulit dimsum 1 pack = 100 lembar, mirin 1 btl = 1 L).
 
 ## Nilai stok
 

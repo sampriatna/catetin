@@ -12,8 +12,10 @@ import ProduksiForm from "./ProduksiForm";
 import Ringkasan from "./Ringkasan";
 import KelolaBahan from "./KelolaBahan";
 import KirimStok from "./KirimStok";
+import HariIni from "./HariIni";
 
 const TABS = [
+  { id: "hari", label: "Hari Ini" },
   { id: "so", label: "SO Shift" },
   { id: "waste", label: "Waste" },
   { id: "produksi", label: "Produksi" },
@@ -32,7 +34,7 @@ export default function DapurApp({ bizId, user, signOut }) {
   const lokasiOptions = allowedLokasi(user);
   const tabs = TABS.filter((t) => !t.manager || isManager);
 
-  const [tab, setTab] = useState("so");
+  const [tab, setTab] = useState("hari");
   const [lokasi, setLokasi] = useState(defaultLokasi(user));
   const [items, setItems] = useState([]);
   const [recipes, setRecipes] = useState([]);
@@ -110,6 +112,10 @@ export default function DapurApp({ bizId, user, signOut }) {
         <div style={{ padding: 30, textAlign: "center", color: C.sub }}>Memuat…</div>
       ) : (
         <>
+          {tab === "hari" && (
+            <HariIni bizId={bizId} user={user} lokasi={lokasi} items={items} snapshot={snapshot}
+              onGo={(t) => setTab(tabs.some((x) => x.id === t) ? t : "so")} />
+          )}
           {tab === "so" && (
             <SoForm bizId={bizId} user={user} lokasi={lokasi} items={items} templates={templates} snapshot={snapshot} onSaved={reload}
               onWasteFromWa={(w) => { setWastePrefill(w); setTab("waste"); }} />
