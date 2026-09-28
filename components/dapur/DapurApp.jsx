@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, LogOut, RefreshCw } from "lucide-react";
 import { LOKASI_LABEL, allowedLokasi, defaultLokasi, canManageMaster, isOutletLocked } from "../../lib/inventoryLogic";
-import { loadItems, loadRecipes, loadStockSnapshot, loadEvents, loadSoTemplates } from "../../lib/inventoryRepo";
+import { loadItems, loadRecipes, loadStockSnapshot, loadEvents, loadSoTemplates, loadMenus, loadMenuAliases } from "../../lib/inventoryRepo";
 import { C, Notice } from "./ui";
 import SoForm from "./SoForm";
 import GerakForm from "./GerakForm";
@@ -14,6 +14,8 @@ import Ringkasan from "./Ringkasan";
 import KelolaBahan from "./KelolaBahan";
 import KirimStok from "./KirimStok";
 import HariIni from "./HariIni";
+import Penjualan from "./Penjualan";
+import ResepMenu from "./ResepMenu";
 
 const TABS = [
   { id: "hari", label: "Hari Ini" },
@@ -23,6 +25,8 @@ const TABS = [
   { id: "produksi", label: "Produksi" },
   { id: "kirim", label: "Kirim Stok" },
   { id: "audit", label: "Audit", owner: true },
+  { id: "penjualan", label: "Penjualan", owner: true },
+  { id: "menu", label: "Resep Menu", manager: true },
   { id: "ringkasan", label: "Stok & Riwayat" },
   { id: "kelola", label: "Kelola", manager: true },
 ];
@@ -46,6 +50,9 @@ export default function DapurApp({ bizId, user, signOut }) {
   const [events, setEvents] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [wastePrefill, setWastePrefill] = useState(null);
+  const [menus, setMenus] = useState([]);
+  const [aliases, setAliases] = useState([]);
+  const [menuPrefill, setMenuPrefill] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
@@ -75,6 +82,19 @@ export default function DapurApp({ bizId, user, signOut }) {
 
   useEffect(() => { reload(); }, [reload]);
   const clearWastePrefill = useCallback(() => setWastePrefill(null), []);
+  const clearMenuPrefill = useCallback(() => setMenuPrefill(null), []);
+
+  // Resep menu & nama POS hanya dimuat untuk tab yang memakainya.
+  const needMenus = tab === "penjualan" || tab === "menu";
+  const reloadMenus = useCallback(async () => {
+    try {
+      const [m, a] = await Promise.all([loadMenus(bizId), loadMenuAliases(bizId)]);
+      setMenus(m); setAliases(a);
+    } catch (e) {
+      setErr(e.message || String(e));
+    }
+  }, [bizId]);
+  useEffect(() => { if (needMenus && bizId) reloadMenus(); }, [needMenus, bizId, reloadMenus]);
 
   const lokasiScope = useMemo(() => (isOutletLocked(role) ? lokasiOptions : ["GDG", "KBU", "KSM", "SMT"]), [role, lokasiOptions]);
   // Akun dapur hanya punya modul ini: tombol kembali diganti Keluar.
@@ -146,6 +166,14 @@ export default function DapurApp({ bizId, user, signOut }) {
             <Ringkasan bizId={bizId} items={items} snapshot={snapshot} events={events} lokasiScope={lokasiScope}
               canDelete={role === "owner" || role === "admin"} onChanged={reload} />
           )}
+          {tab === "penjualan" && isOwner && (
+            <Penjualan bizId={bizId} user={user} menus={menus} aliases={aliases} onChanged={reloadMenus}
+              onBuatResep={(p) => { setMenuPrefill(p); setTab("menu"); }} />
+          )}
+          {tab === "menu" && isManager && (
+            <ResepMenu bizId={bizId} items={items} templates={templates} menus={menus} prefill={menuPrefill}
+              onPrefillUsed={clearMenuPrefill} onChanged={reloadMenus} />
+          )}
           {tab === "kelola" && isManager && <KelolaBahan bizId={bizId} items={items} recipes={recipes} templates={templates} onChanged={reload} />}
         </>
       )}
@@ -170,7 +198,7 @@ function Shell({ children, onReload, loading, onLogout }) {
           )}
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 18, fontWeight: 800 }}>Dapur & Stok</div>
-            <div style={{ fontSize: 12, color: C.sub }}>SO shift · waste · produksi · kirim stok</div>
+            <div style={{ fontSize: 12, color: C.sub }}>SO shift · waste · produksi · kirim stok · penjualan</div>
           </div>
           {onReload && (
             <button type="button" onClick={onReload} aria-label="Muat ulang" disabled={loading}

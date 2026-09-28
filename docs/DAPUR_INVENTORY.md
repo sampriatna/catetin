@@ -47,6 +47,16 @@ Sumber kebenaran = SO fisik. Penjualan belum dipakai (mode pemantauan harian).
 - Prioritas dari nilai Rp: Info < Rp25rb ≤ Pantau < Rp100rb ≤ Peringatan < Rp500rb ≤ Kritis; berulang ≥3× naik satu tingkat.
 - Owner/admin: kartu **Insight stok** di Hari Ini dan tab **Audit** (filter lokasi & prioritas, rincian buku pergerakan per barang).
 
+## Penjualan & resep menu (Tahap B)
+
+- **Resep Menu** (owner/admin/purchasing): bahan untuk **1 porsi** tiap menu per outlet (KBU, KSM, SMT), satuan bebas (gr, ml, pcs, porsi, atau satuan SO seperti btl) → disimpan dalam satuan master. Modal per porsi dan food cost % terhadap harga jual dihitung dari modal bahan saat ini. Tabel `inv_menus`, `inv_menu_lines`.
+- **Penjualan** (owner/admin): upload export ESB *Sales Menu Recapitulation Report* (Branch All; outlet dibaca dari kategori "FOOD KISAMEN", "DRINK KOPI BURI UMAH", "SAM DIMSUM") atau CSV/Excel sederhana (kolom Menu + Qty, opsional Tanggal/Outlet/Net Sales). Kategori yang tidak dikenali bisa dipilih outletnya atau diabaikan. Baris refund (Sales Type ≠ Sales) dilewati. Upload ulang periode yang bertumpuk untuk outlet yang sama **mengganti** data lama. RPC `inv_sales_save`; data penjualan hanya bisa dibaca owner/admin.
+- **Cocokkan menu POS ↔ resep**: setiap nama menu POS disimpan sekali per outlet (`inv_menu_aliases`); owner memilih resepnya, membuat resep baru, atau **Abaikan** (tidak memakai stok). Disarankan otomatis dari kemiripan nama; diurutkan dari omset terbesar.
+- `inv_stock_movements` menambah tipe **jual** (rekap harian) dan **jual_periode** (rekap beberapa hari) = qty terjual × bahan per porsi, ditaruh pukul 12.00 WIB di tanggalnya.
+- **Audit harian** memakai penjualan harian bila setiap hari di antara dua SO punya rekap harian untuk outlet itu: seharusnya = SO lalu + masuk − keluar − terjual. Berkurang lebih banyak dari itu → temuan **kurang** (keyakinan sedang, tinggi bila berulang ≥3×). Tanpa rekap harian, temuan "berkurang" tetap *menunggu data penjualan*.
+- **Penjualan vs Pemakaian** (tab Audit, per periode upload atau tanggal bebas): per bahan per outlet, **aktual** = SO sebelum periode + masuk − keluar − SO akhir periode, **teori** = terjual × resep, selisih dalam satuan & Rp dengan prioritas. Selisih < 10% atau di bawah toleransi timbangan = Info. Bahan yang terpakai menurut SO tapi tidak ada di resep menu mana pun juga ditandai.
+- `supabase/seed/inventory_menus_nusa_food.sql`: resep menu dari sheet HPP menu KBU, minuman KBU, dan HPP Kisamen + nama POS ESB (Sep 2026) yang sudah cocok. Bahan yang belum ada di master (nasi, lalapan, es batu, kemasan per pcs, sambal per porsi, kopi espresso, sirup yang ukuran botolnya belum diketahui) belum dimasukkan — lengkapi di tab Resep Menu.
+
 ## Checklist beranda
 
 - **Kasir** (bar KBU, minuman KSM, Samtaro): tugas wajib **SO Stok Akhir Shift** di checklist harian bersama omset/SDM/sosmed. Selesai (✓) setelah akun itu mengirim SO hari ini. **Terima Kiriman Gudang** jadi mendesak kalau ada kiriman yang belum dicek.
@@ -81,6 +91,7 @@ Kartu **Nilai Stok** (beranda owner/admin & tab Stok & Riwayat): total dan per l
 5. Jalankan `supabase/migrations/20260928090000_inventory_transfer.sql` (tabel `inv_transfers`, `inv_transfer_lines`, RPC `inv_transfer_save`).
 6. Jalankan `supabase/migrations/20260928120000_inventory_dapur_roles.sql` (role `dapur`, area daftar SO, `inv_stock_value_series`) lalu `supabase/seed/inventory_so_area_nusa_food.sql`.
 7. Jalankan `supabase/migrations/20260929090000_inventory_audit_tahap_a.sql` (area, barang masuk, `inv_stock_movements`).
-8. Buat resep produksi di tab Kelola → Resep.
+8. Jalankan `supabase/migrations/20260930090000_inventory_sales_bom.sql` (resep menu, penjualan, `inv_sales_save`, tipe `jual` di `inv_stock_movements`) lalu `supabase/seed/inventory_menus_nusa_food.sql`.
+9. Buat resep produksi di tab Kelola → Resep.
 
 Test logika: `npm run test:inventory`.
