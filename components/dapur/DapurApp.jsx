@@ -159,7 +159,7 @@ export default function DapurApp({ bizId, user, signOut }) {
           {tab === "masuk" && (
             <GerakForm key={`masuk-${lokasi}`} mode="masuk" bizId={bizId} user={user} lokasi={lokasi} items={items} templates={templates} onSaved={reload} />
           )}
-          {tab === "audit" && isOwner && <AuditStok bizId={bizId} items={items} />}
+          {tab === "audit" && isOwner && <AuditStok bizId={bizId} user={user} items={items} />}
           {tab === "produksi" && <ProduksiForm bizId={bizId} user={user} lokasi={lokasi} items={items} recipes={recipes} snapshot={snapshot} onSaved={reload} />}
           {tab === "kirim" && <KirimStok bizId={bizId} user={user} items={items} templates={templates} onSaved={reload} />}
           {tab === "ringkasan" && (

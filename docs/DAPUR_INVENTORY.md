@@ -57,6 +57,12 @@ Sumber kebenaran = SO fisik. Penjualan belum dipakai (mode pemantauan harian).
 - **Penjualan vs Pemakaian** (tab Audit, per periode upload atau tanggal bebas): per bahan per outlet, **aktual** = SO sebelum periode + masuk − keluar − SO akhir periode, **teori** = terjual × resep, selisih dalam satuan & Rp dengan prioritas. Selisih < 10% atau di bawah toleransi timbangan = Info. Bahan yang terpakai menurut SO tapi tidak ada di resep menu mana pun juga ditandai.
 - `supabase/seed/inventory_menus_nusa_food.sql`: resep menu dari sheet HPP menu KBU, minuman KBU, dan HPP Kisamen + nama POS ESB (Sep 2026) yang sudah cocok. Bahan yang belum ada di master (nasi, lalapan, es batu, kemasan per pcs, sambal per porsi, kopi espresso, sirup yang ukuran botolnya belum diketahui) belum dimasukkan — lengkapi di tab Resep Menu.
 
+## Audit mingguan & AI (Tahap C)
+
+- **Laporan audit mingguan** (tab Audit, owner/admin): pilih minggu ini / minggu lalu / 2–3 minggu lalu (Senin–Minggu). Server (`/api/dapur/audit-mingguan`) menghitung ulang dari SO, waste, barang masuk, produksi, kiriman, dan penjualan dengan izin user (RLS), lalu Claude menulis ringkasan, poin yang perlu dicek, dan langkah minggu depan dalam bahasa netral. Tanpa `ANTHROPIC_API_KEY` atau bila AI gagal → ringkasan otomatis. Disimpan di `inv_audit_reports` (satu per periode; "Hitung ulang" menimpa). Bisa dikirim ke WA.
+- **Audit mundur**: karena SO tidak pernah diubah dan semua pergerakan tersimpan, laporan minggu-minggu lalu bisa dibuat kapan saja; data penjualan yang di-upload belakangan ikut terpakai saat dihitung ulang.
+- **Tindak lanjut temuan**: buka temuan di tab Audit → isi hasil pengecekan → *Sudah dicek — wajar* / *Perlu tindakan* / *Sudah ditindaklanjuti* (`inv_audit_notes`). Temuan wajar/selesai tidak dihitung lagi di kartu Insight, daftar Audit, maupun laporan mingguan; *Perlu tindakan* tetap tampil.
+
 ## Checklist beranda
 
 - **Kasir** (bar KBU, minuman KSM, Samtaro): tugas wajib **SO Stok Akhir Shift** di checklist harian bersama omset/SDM/sosmed. Selesai (✓) setelah akun itu mengirim SO hari ini. **Terima Kiriman Gudang** jadi mendesak kalau ada kiriman yang belum dicek.
@@ -92,6 +98,7 @@ Kartu **Nilai Stok** (beranda owner/admin & tab Stok & Riwayat): total dan per l
 6. Jalankan `supabase/migrations/20260928120000_inventory_dapur_roles.sql` (role `dapur`, area daftar SO, `inv_stock_value_series`) lalu `supabase/seed/inventory_so_area_nusa_food.sql`.
 7. Jalankan `supabase/migrations/20260929090000_inventory_audit_tahap_a.sql` (area, barang masuk, `inv_stock_movements`).
 8. Jalankan `supabase/migrations/20260930090000_inventory_sales_bom.sql` (resep menu, penjualan, `inv_sales_save`, tipe `jual` di `inv_stock_movements`) lalu `supabase/seed/inventory_menus_nusa_food.sql`.
-9. Buat resep produksi di tab Kelola → Resep.
+9. Jalankan `supabase/migrations/20261001090000_inventory_audit_mingguan.sql` (laporan audit & catatan tindak lanjut). Ringkasan AI memakai `ANTHROPIC_API_KEY` yang sama dengan fitur AI lain.
+10. Buat resep produksi di tab Kelola → Resep.
 
 Test logika: `npm run test:inventory`.
