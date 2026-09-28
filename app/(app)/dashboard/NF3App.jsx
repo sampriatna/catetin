@@ -1969,12 +1969,13 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
               onClick: () => { window.location.href = "/dapur?tab=so"; },
             }, {
               id: "kirimstok",
-              title: dapurToday?.permintaanMenunggu ? `Permintaan Outlet (${dapurToday.permintaanMenunggu})` : "Kirim Stok ke Outlet",
+              // Judul tetap sama supaya staf mudah menemukan; kosong → opsional, ada permintaan → oranye & wajib.
+              title: `Permintaan Outlet${dapurToday?.permintaanMenunggu ? ` (${dapurToday.permintaanMenunggu})` : ""}`,
               subtitle: dapurToday?.permintaanMenunggu
                 ? "Outlet minta barang — isi jumlah yang dikirim"
                 : dapurToday?.kirimanMasuk
-                  ? `${dapurToday.kirimanMasuk} kiriman belum diterima outlet`
-                  : "Proses permintaan outlet, catat kiriman gudang → outlet",
+                  ? `Belum ada permintaan baru · ${dapurToday.kirimanMasuk} kiriman belum diterima outlet`
+                  : "Belum ada permintaan dari outlet · bisa juga kirim stok tanpa permintaan",
               done: false,
               optional: !dapurToday?.permintaanMenunggu,
               urgent: !!dapurToday?.permintaanMenunggu,
