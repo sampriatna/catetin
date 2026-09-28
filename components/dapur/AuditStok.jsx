@@ -1,14 +1,15 @@
 "use client";
-// Audit stok harian (Tahap A): buku pergerakan per barang + temuan kejanggalan.
-// Mode "Pemantauan harian" — belum memakai data penjualan. SO staf tidak pernah diubah;
-// selisih antara stok seharusnya dan SO disimpan sebagai data audit.
+// Audit stok: temuan harian (Tahap A), penjualan vs pemakaian (Tahap B), laporan mingguan + AI (Tahap C).
+// SO staf tidak pernah diubah; selisih antara stok seharusnya dan SO disimpan sebagai data audit.
+// Owner bisa menandai temuan (wajar / perlu tindakan / selesai); yang wajar/selesai tidak dihitung lagi.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  LOKASI, LOKASI_LABEL, OUTLET_JUAL, PRIORITY, PRIORITY_LABEL, auditMovements, daysBetween, salesUsageReport, usageMessage, todayJakarta, fmtRp, fmtQty,
+  LOKASI, LOKASI_LABEL, OUTLET_JUAL, PRIORITY, PRIORITY_LABEL, NOTE_STATUS, auditMovements, findingKey, salesDaysFrom, salesUsageReport, usageMessage, todayJakarta, fmtRp, fmtQty,
 } from "../../lib/inventoryLogic";
-import { loadStockMovements, loadSalesUploads } from "../../lib/inventoryRepo";
-import { C, card, dateInput, label, Chips, Notice } from "./ui";
+import { loadStockMovements, loadSalesUploads, loadAuditNotes, saveAuditNote } from "../../lib/inventoryRepo";
+import { C, card, dateInput, input, label, Chips, Notice } from "./ui";
+import LaporanMingguan from "./LaporanMingguan";
 
 function addDays(ymd, n) {
   const d = new Date(`${ymd}T00:00:00Z`);
@@ -16,37 +17,30 @@ function addDays(ymd, n) {
   return d.toISOString().slice(0, 10);
 }
 
-/** Hari-hari per outlet yang punya rekap penjualan harian ("KBU|2026-09-01"). */
-export function salesDaysFrom(uploads) {
-  const set = new Set();
-  for (const u of uploads || []) {
-    if (!u.per_hari) continue;
-    const days = [u.dari, ...daysBetween(u.dari, u.sampai)];
-    for (const l of u.lokasi || []) for (const d of days) set.add(`${l}|${d}`);
-  }
-  return set;
-}
-
 /** Muat pergerakan 21 hari, audit 7 hari terakhir (riwayat sebelumnya dipakai sebagai pola normal). */
 export function useStockAudit(bizId, items, { days = 7 } = {}) {
-  const [state, setState] = useState({ loading: true, err: "", findings: [], ledger: [], uploads: [] });
+  const [state, setState] = useState({ loading: true, err: "", findings: [], ledger: [], uploads: [], checked: [] });
   const itemsById = useMemo(() => Object.fromEntries((items || []).map((i) => [i.id, i])), [items]);
   const load = useCallback(async () => {
     if (!bizId) return;
     const today = todayJakarta();
     try {
-      const [mv, uploads] = await Promise.all([
+      const [mv, uploads, notes] = await Promise.all([
         loadStockMovements(bizId, addDays(today, -20), today),
         loadSalesUploads(bizId).catch(() => []),
+        loadAuditNotes(bizId).catch(() => []),
       ]);
+      const noteMap = Object.fromEntries(notes.map((n) => [n.finding_key, n]));
       const { findings, ledger } = auditMovements(mv, itemsById, { from: addDays(today, -(days - 1)), salesDays: salesDaysFrom(uploads) });
-      setState({ loading: false, err: "", findings, ledger, uploads });
+      const withNote = findings.map((f) => ({ ...f, key: findingKey(f), note: noteMap[findingKey(f)] || null }));
+      const done = (f) => f.note && f.note.status !== "tindak";
+      setState({ loading: false, err: "", findings: withNote.filter((f) => !done(f)), checked: withNote.filter(done), ledger, uploads });
     } catch (e) {
-      setState({ loading: false, err: e.message || String(e), findings: [], ledger: [], uploads: [] });
+      setState({ loading: false, err: e.message || String(e), findings: [], ledger: [], uploads: [], checked: [] });
     }
   }, [bizId, itemsById, days]);
   useEffect(() => { load(); }, [load]);
-  return state;
+  return { ...state, reload: load };
 }
 
 export const PRIORITY_COLOR = {
@@ -75,11 +69,57 @@ export function FindingRow({ f, itemsById, showLokasi = true }) {
       <div style={{ fontSize: 11, color: C.sub }}>
         Keyakinan {f.confidence === "HIGH" ? "tinggi" : f.confidence === "MEDIUM" ? "sedang" : "rendah"} · {f.status}{f.rp ? ` · ${fmtRp(Math.abs(f.rp))}` : ""}
       </div>
+      {f.note && (
+        <div style={{ fontSize: 12, color: f.note.status === "tindak" ? C.warn : C.ok, fontWeight: 700 }}>
+          {NOTE_STATUS.find((x) => x.id === f.note.status)?.label}{f.note.catatan ? `: ${f.note.catatan}` : ""}
+        </div>
+      )}
     </div>
   );
 }
 
-export default function AuditStok({ bizId, items }) {
+/** Tandai hasil pengecekan satu temuan. */
+function NoteEditor({ bizId, user, f, onSaved }) {
+  const [catatan, setCatatan] = useState(f.note?.catatan || "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const save = async (status) => {
+    setBusy(true); setErr("");
+    try {
+      await saveAuditNote(bizId, f.key, { status, catatan, by: user?.name || user?.email || null });
+      onSaved?.();
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
+      <span style={{ ...label, marginBottom: 0 }}>Hasil pengecekan</span>
+      <input value={catatan} onChange={(e) => setCatatan(e.target.value)} style={{ ...input, fontSize: 13, padding: "9px 10px" }}
+        placeholder="Mis. barang masuk tgl 3 lupa dicatat" />
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {NOTE_STATUS.map((st) => (
+          <button key={st.id} type="button" disabled={busy} onClick={() => save(st.id)}
+            style={{ padding: "7px 10px", borderRadius: 999, fontSize: 12, fontWeight: 800, cursor: "pointer",
+              border: `1px solid ${f.note?.status === st.id ? C.brand : C.line}`, background: f.note?.status === st.id ? C.brand : "#fff", color: f.note?.status === st.id ? "#fff" : C.ink }}>
+            {st.label}
+          </button>
+        ))}
+        {f.note && (
+          <button type="button" disabled={busy} onClick={() => save(null)}
+            style={{ padding: "7px 10px", borderRadius: 999, fontSize: 12, fontWeight: 800, cursor: "pointer", border: `1px solid ${C.line}`, background: "#fff", color: C.sub }}>
+            Hapus tanda
+          </button>
+        )}
+      </div>
+      {err && <Notice kind="bad">{err}</Notice>}
+    </div>
+  );
+}
+
+export default function AuditStok({ bizId, user, items }) {
   const audit = useStockAudit(bizId, items);
   const itemsById = useMemo(() => Object.fromEntries((items || []).map((i) => [i.id, i])), [items]);
   const [lok, setLok] = useState("Semua");
@@ -102,6 +142,8 @@ export default function AuditStok({ bizId, items }) {
         <b>Audit harian</b> — dihitung dari SO, waste, barang masuk, produksi, kiriman{audit.uploads.some((u) => u.per_hari) ? ", dan penjualan harian" : ""} 7 hari terakhir.
         {audit.uploads.some((u) => u.per_hari) ? " Hari tanpa rekap penjualan harian" : " Belum ada rekap penjualan harian, jadi temuan"} "berkurang" berstatus <i>menunggu data penjualan</i>. Angka SO staf tidak diubah.
       </Notice>
+
+      <LaporanMingguan bizId={bizId} user={user} />
 
       <UsageReport bizId={bizId} itemsById={itemsById} uploads={audit.uploads} />
 
@@ -151,11 +193,17 @@ export default function AuditStok({ bizId, items }) {
                   </div>
                 ))}
                 <div style={{ color: C.sub, marginTop: 6 }}>Satuan: {itemsById[f.item_id]?.satuan}. "Keluar" = waste + dipakai produksi + dikirim + terjual (penjualan harian × resep).</div>
+                <NoteEditor bizId={bizId} user={user} f={f} onSaved={() => { setOpenItem(null); audit.reload(); }} />
               </div>
             )}
           </div>
         ))}
         {!list.length && <div style={{ padding: "4px 14px 14px", fontSize: 13, color: C.sub }}>Tidak ada temuan. SO minimal 2 kali per barang supaya bisa dibandingkan.</div>}
+        {audit.checked.length > 0 && (
+          <div style={{ padding: "8px 14px 12px", fontSize: 12, color: C.sub, borderTop: `1px solid ${C.line}` }}>
+            {audit.checked.length} temuan sudah dicek (wajar / selesai) dan tidak dihitung lagi.
+          </div>
+        )}
       </div>
     </div>
   );
