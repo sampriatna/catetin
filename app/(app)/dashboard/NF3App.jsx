@@ -214,7 +214,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 @keyframes task-progress{from{width:0}to{width:var(--prog,0%)}}
 .task-row-pending{animation:task-pulse-border 2.2s ease-in-out infinite}
 .task-row-urgent{animation:task-urgent-pulse 2s ease-in-out infinite}
-.task-row-done{border-left:4px solid var(--in)!important;transition:border-color .25s,background .25s,opacity .25s}
 .task-check-pop{animation:task-check-pop .4s cubic-bezier(.34,1.56,.64,1)}
 .task-progress-fill{animation:task-progress .6s ease-out}
 .task-row-inner{display:flex;align-items:center;gap:12px;width:100%}
@@ -1005,65 +1004,64 @@ function WalletIcon({ wallet, size = 40 }) {
 }
 
 function DailyTaskRow({ step, title, subtitle, done, blocked, urgent, count, optional, onClick, actionLabel: actionLabelProp = null }) {
-  const rowClass = [
-    "task-row-inner",
-    done ? "task-row-done" : urgent ? "task-row-urgent" : !blocked && !optional ? "task-row-pending" : "",
-  ].filter(Boolean).join(" ");
-  const badgeLabel = done ? "Selesai" : blocked ? "Tunggu" : urgent ? (count ? `${count} perlu` : "Perlu aksi") : optional ? "Opsional" : "Belum";
-  const badgeBg = done ? "var(--in-soft)" : blocked ? "var(--surface2)" : urgent ? "#FEE2E2" : optional ? "var(--surface2)" : "#FEF3C7";
-  const badgeColor = done ? "var(--in-text)" : blocked ? "var(--ink3)" : urgent ? "var(--out-text)" : optional ? "var(--ink3)" : "#B45309";
+  // Satu kartu = satu tugas. Tombol aksi jelas di kanan; status "Belum" cukup dari tombol + nomor.
   const actionLabel = actionLabelProp || (done ? "Lihat" : urgent ? "Proses" : optional ? "Buka" : "Isi");
+  const tone = done ? "done" : urgent ? "urgent" : optional ? "optional" : "todo";
+  const accent = { done: "var(--in)", urgent: "#F59E0B", optional: "var(--ink3)", todo: "var(--brand)" }[tone];
+  const statusText = done ? "Selesai" : blocked ? "Tunggu" : urgent ? (count ? `${count} perlu diproses` : "Perlu diproses") : null;
 
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={blocked}
+      className={tone === "todo" && !blocked ? "task-row-pending" : tone === "urgent" ? "task-row-urgent" : undefined}
       style={{
         width: "100%",
-        padding: "14px 14px 14px 12px",
+        padding: optional ? "11px 12px" : "14px 12px",
         borderRadius: 16,
-        border: done ? "1px solid var(--line)" : urgent ? "2px solid #F59E0B" : optional ? "1px dashed var(--line)" : "2px solid var(--brand)",
-        background: done ? "var(--surface)" : urgent ? "var(--amber-soft)" : optional ? "var(--surface2)" : "var(--brand-soft)",
+        border: tone === "todo" ? "2px solid var(--brand)" : tone === "urgent" ? "2px solid #F59E0B" : "1px solid var(--line)",
+        background: tone === "urgent" ? "var(--amber-soft)" : "var(--surface)",
         cursor: blocked ? "not-allowed" : "pointer",
         textAlign: "left",
-        opacity: blocked ? 0.55 : done ? 0.92 : 1,
-        boxShadow: done || optional ? "none" : urgent ? undefined : "0 2px 12px rgba(99,102,241,.12)",
+        opacity: blocked ? 0.55 : 1,
         transition: "transform .15s ease, opacity .25s ease",
+        display: "block",
       }}
-      className={done ? "task-row-done" : urgent ? "task-row-urgent" : !blocked && !optional ? "task-row-pending" : undefined}
       onMouseDown={e => { if (!blocked) e.currentTarget.style.transform = "scale(0.985)"; }}
       onMouseUp={e => { e.currentTarget.style.transform = ""; }}
       onMouseLeave={e => { e.currentTarget.style.transform = ""; }}
     >
-      <div className={rowClass}>
+      <div className="task-row-inner">
         <div
           className={done ? "task-check-pop" : undefined}
           style={{
-            width: 40, height: 40, borderRadius: 12, flexShrink: 0,
-            background: done ? "var(--in-soft)" : urgent ? "#F59E0B" : optional ? "var(--line)" : "var(--brand)",
+            width: optional ? 32 : 40, height: optional ? 32 : 40, borderRadius: 12, flexShrink: 0,
+            background: done ? "var(--in-soft)" : urgent ? "#F59E0B" : optional ? "var(--surface2)" : "var(--brand)",
             color: done ? "var(--in-text)" : optional ? "var(--ink3)" : "#fff",
-            display: "grid", placeItems: "center", fontWeight: 800, fontSize: done ? 18 : 15,
+            display: "grid", placeItems: "center", fontWeight: 800, fontSize: done ? 18 : optional ? 13 : 16,
           }}
         >
           {done ? <Check size={20} strokeWidth={3} /> : optional ? "★" : step}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: "var(--ink)", lineHeight: 1.3, flex: 1, minWidth: 0 }}>{title}</div>
-            <span style={{
-              fontSize: 10, fontWeight: 700, letterSpacing: "0.02em",
-              padding: "3px 8px", borderRadius: 99, background: badgeBg, color: badgeColor,
-              whiteSpace: "nowrap", flexShrink: 0, marginTop: 1,
-            }}>
-              {badgeLabel}
-            </span>
-          </div>
-          <div style={{ fontSize: 12, color: done ? "var(--ink3)" : "var(--ink2)", marginTop: 4, lineHeight: 1.45 }}>{subtitle}</div>
+          <div style={{ fontWeight: 800, fontSize: optional ? 14 : 15, color: done ? "var(--ink2)" : "var(--ink)", lineHeight: 1.3 }}>{title}</div>
+          {statusText && (
+            <div style={{ fontSize: 11, fontWeight: 800, color: done ? "var(--in-text)" : urgent ? "#B45309" : "var(--ink3)", marginTop: 2 }}>
+              {done ? "✓ " : ""}{statusText}
+            </div>
+          )}
+          <div style={{ fontSize: 12, color: done ? "var(--ink3)" : "var(--ink2)", marginTop: 3, lineHeight: 1.4 }}>{subtitle}</div>
         </div>
         {!blocked && (
-          <span style={{ fontSize: 12, fontWeight: 700, color: done ? "var(--ink3)" : urgent ? "#B45309" : "var(--brand)", display: "flex", alignItems: "center", gap: 2, flexShrink: 0, alignSelf: "center" }}>
-            {actionLabel} <ChevronRight size={14} />
+          <span style={{
+            flexShrink: 0, alignSelf: "center", display: "inline-flex", alignItems: "center", gap: 2,
+            fontSize: 13, fontWeight: 800, whiteSpace: "nowrap",
+            padding: done || optional ? "6px 8px" : "8px 12px", borderRadius: 999,
+            background: done || optional ? "transparent" : accent,
+            color: done || optional ? accent : "#fff",
+          }}>
+            {actionLabel} <ChevronRight size={15} />
           </span>
         )}
       </div>
@@ -1124,11 +1122,18 @@ function RoleDailyChecklist({ tasks, accentGradient, headerLabel = "Checklist Ha
         )}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {tasks.map((t, i) => {
-          const step = t.optional ? "★" : tasks.slice(0, i).filter(x => !x.optional).length + 1;
-          return <DailyTaskRow key={t.id} step={step} {...t} />;
-        })}
+        {tasks.filter(t => !t.optional).map((t, i) => <DailyTaskRow key={t.id} step={i + 1} {...t} />)}
       </div>
+      {tasks.some(t => t.optional) && (
+        <>
+          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--ink3)", margin: "16px 4px 8px" }}>
+            Menu lain (tidak wajib)
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {tasks.filter(t => t.optional).map(t => <DailyTaskRow key={t.id} step="★" {...t} />)}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1989,7 +1994,7 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
             <RoleDailyChecklist
               tasks={tasks}
               accentGradient={ui.saldoGradient}
-              headerHint="Catat setiap belanja ke dompet yang dipakai"
+              headerHint="Kerjakan tugas bernomor sampai semuanya ✓ hari ini"
             />
           );
         }
