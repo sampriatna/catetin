@@ -5,18 +5,18 @@ import { useCallback, useEffect, useState } from "react";
 import { summarizeDapurToday, todayJakarta } from "../../lib/inventoryLogic";
 import { loadDapurToday } from "../../lib/inventoryRepo";
 
-export default function useDapurToday({ bizId, lokasi, userId, enabled = true }) {
+export default function useDapurToday({ bizId, lokasi, userId, area = null, enabled = true }) {
   const [status, setStatus] = useState(null);
   const refresh = useCallback(async () => {
     if (!enabled || !bizId) return;
     const today = todayJakarta();
     try {
-      const data = await loadDapurToday(bizId, { lokasi, today });
+      const data = await loadDapurToday(bizId, { lokasi, today, area });
       setStatus(summarizeDapurToday({ ...data, lokasi, userId, today }));
     } catch {
       setStatus(null); // tabel belum ada / offline — checklist tetap tampil tanpa status
     }
-  }, [bizId, lokasi, userId, enabled]);
+  }, [bizId, lokasi, userId, area, enabled]);
 
   useEffect(() => {
     refresh();

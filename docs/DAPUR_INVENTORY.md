@@ -63,6 +63,29 @@ Sumber kebenaran = SO fisik. Penjualan belum dipakai (mode pemantauan harian).
 - **Audit mundur**: karena SO tidak pernah diubah dan semua pergerakan tersimpan, laporan minggu-minggu lalu bisa dibuat kapan saja; data penjualan yang di-upload belakangan ikut terpakai saat dihitung ulang.
 - **Tindak lanjut temuan**: buka temuan di tab Audit → isi hasil pengecekan → *Sudah dicek — wajar* / *Perlu tindakan* / *Sudah ditindaklanjuti* (`inv_audit_notes`). Temuan wajar/selesai tidak dihitung lagi di kartu Insight, daftar Audit, maupun laporan mingguan; *Perlu tindakan* tetap tampil.
 
+## Tampilan per peran
+
+Satu sumber izin: `lib/dapurAccess.js` (`dapurAccess(user)` → `can(cap)`, `canTab(tab)`, lokasi & area). Komponen tidak mengecek nama role sendiri. URL langsung `?tab=…` yang tidak diizinkan diarahkan ke Hari Ini dengan pesan "Menu ini tidak tersedia untuk peran kamu." Role yang tidak dikenal tidak mendapat akses.
+
+| Role di database | Profil | Menu |
+|---|---|---|
+| owner, admin | Owner | Semua: Hari Ini (ringkasan lintas lokasi), SO, Waste, Barang Masuk, Produksi, Kirim Stok, Stok & Riwayat, Audit, Penjualan, Resep Menu, Kelola; pilih lokasi & daftar bebas |
+| purchasing (outlet kosong) | Purchasing & Gudang — pengaturan Nusa Food sekarang | Hari Ini (belanja, barang masuk, SO gudang, permintaan menunggu), SO Gudang, Waste Gudang, Barang Masuk (lokasi bebas), Produksi Gudang, Kirim Stok, Stok & Riwayat, Resep Menu, Kelola |
+| purchasing + outlet `GDG`/`GUDANG` | Gudang | sama seperti di atas tanpa tugas belanja |
+| purchasing + area lain (mis. area dompet) | Purchasing | Hari Ini (catat belanja, barang masuk, stok minimum), Barang Masuk (hanya pembelian/retur, lokasi bebas), Stok & Riwayat (lihat), Resep Menu, Kelola |
+| dapur + KBU/KSM/SMT | Outlet Dapur | Hari Ini, SO Dapur, Waste Dapur, Produksi (resep yang hasilnya ada di daftar dapur), Minta & Terima, Stok & Riwayat outletnya |
+| kasir + KBU/KSM/SMT | Outlet Bar | sama, dengan daftar bar (Samtaro: baris tanpa area = semua) |
+
+Purchasing boleh input di semua lokasi (keputusan owner). Kelola & Resep Menu: owner, purchasing, gudang — tidak untuk outlet.
+
+Staf outlet hanya melihat barang yang ada di daftar SO outletnya (SO, Waste). Barang yang tercatat di outlet tapi tidak ada di daftarnya bisa dirapikan di **Kelola → Cek Lokasi** (dikelompokkan: bahan produksi gudang, bahan lain, kemasan & kebersihan) dengan tombol *Lepas dari outlet*.
+
+Permintaan & kiriman stok menyimpan bagian (`inv_transfers.area`): akun dapur selalu `dapur`, kasir `bar` (Samtaro tanpa bagian). Dapur tidak melihat/menerima kiriman bar dan sebaliknya; kiriman lama tanpa bagian terlihat keduanya.
+
+**SO awal**: lokasi yang belum pernah di-SO menampilkan tugas "SO awal" di Hari Ini dan petunjuk di form SO — hitung semua barang (yang habis tekan *Habis*); angka ini jadi stok & nilai awal. Untuk gudang: purchasing/gudang buka Dapur & Stok → **SO Gudang**.
+
+Lokasi outlet & gudang otomatis (pemilih lokasi hanya tampil bila ada lebih dari satu pilihan). Bagian dapur/bar diambil dari `inv_so_template.area`. Shift & tanggal otomatis, dibuka lewat "Ubah". Waste, produksi, dan permintaan stok ada di "Aksi lain", bukan tugas wajib; permintaan outlet dan kiriman hanya jadi tugas bila memang menunggu.
+
 ## Checklist beranda
 
 - **Kasir** (bar KBU, minuman KSM, Samtaro): tugas wajib **SO Stok Akhir Shift** di checklist harian bersama omset/SDM/sosmed. Selesai (✓) setelah akun itu mengirim SO hari ini. **Terima Kiriman Gudang** jadi mendesak kalau ada kiriman yang belum dicek.
@@ -99,6 +122,7 @@ Kartu **Nilai Stok** (beranda owner/admin & tab Stok & Riwayat): total dan per l
 7. Jalankan `supabase/migrations/20260929090000_inventory_audit_tahap_a.sql` (area, barang masuk, `inv_stock_movements`).
 8. Jalankan `supabase/migrations/20260930090000_inventory_sales_bom.sql` (resep menu, penjualan, `inv_sales_save`, tipe `jual` di `inv_stock_movements`) lalu `supabase/seed/inventory_menus_nusa_food.sql`.
 9. Jalankan `supabase/migrations/20261001090000_inventory_audit_mingguan.sql` (laporan audit & catatan tindak lanjut). Ringkasan AI memakai `ANTHROPIC_API_KEY` yang sama dengan fitur AI lain.
-10. Buat resep produksi di tab Kelola → Resep.
+10. Jalankan `supabase/migrations/20261002090000_inventory_transfer_area.sql` (bagian dapur/bar pada permintaan & kiriman stok).
+11. Buat resep produksi di tab Kelola → Resep.
 
 Test logika: `npm run test:inventory`.

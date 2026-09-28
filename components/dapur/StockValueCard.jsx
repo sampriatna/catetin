@@ -110,7 +110,9 @@ export function StockValueView({ sum, lokasiScope, saldo = null, hide = false, z
                   <div style={{ minWidth: 0 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13 }}>
                       <span style={{ fontWeight: 700 }}>{LOKASI_LABEL[l] || l}</span>
-                      <span style={{ fontWeight: 700 }}>{money(p.last)}</span>
+                      {p.last === null || p.last === undefined
+                        ? <span style={{ fontWeight: 700, color: C.sub }}>Belum dihitung</span>
+                        : <span style={{ fontWeight: 700 }}>{money(p.last)}</span>}
                     </div>
                     <div style={{ fontSize: 11, textAlign: "right" }}>{hide ? "" : <Delta v={p.d7} label="7 hari" />}</div>
                   </div>

@@ -1250,6 +1250,7 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
     bizId,
     lokasi: dapurLokasi,
     userId: session?.user?.id || user.id || null,
+    area: user.role === "kasir" ? "bar" : null,
     enabled: !!features?.isFnB && !!dapurLokasi,
   });
   const purchasingArea = user.role === "purchasing" && user.outlet && !["KBU", "KSM", "SMT"].includes(user.outlet)
