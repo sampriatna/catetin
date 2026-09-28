@@ -222,6 +222,13 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
         )}
       </div>
 
+      {Object.keys(lastByItem).length === 0 && (
+        <Notice kind="warn">
+          <b>SO awal {lokasi === "GDG" ? "Gudang" : "outlet"}</b> — belum pernah ada SO di sini. Hitung <b>semua</b> barang yang ada (yang habis tekan <b>Habis</b>).
+          Angka ini jadi stok & nilai awal; SO berikutnya dibandingkan dengan ini.
+        </Notice>
+      )}
+
       <PasteWaPanel onApply={applyPaste} />
       {pasteInfo && <PasteResult info={pasteInfo} onWaste={onWasteFromWa} onClose={() => setPasteInfo(null)} />}
 
@@ -240,7 +247,7 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
           <input type="checkbox" checked={onlyEmpty} onChange={(e) => setOnlyEmpty(e.target.checked)} />
           Tampilkan yang belum dihitung saja
         </label>
-        {hasTemplate && (
+        {hasTemplate && !access?.hanyaDaftarSo && (
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.sub }}>
             <input type="checkbox" checked={showOthers} onChange={(e) => setShowOthers(e.target.checked)} />
             Tampilkan juga bahan di luar daftar SO outlet ({rows.filter((r) => !r.template).length})

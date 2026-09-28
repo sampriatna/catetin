@@ -1,11 +1,14 @@
 "use client";
-// Kelola master bahan & resep produksi (owner/admin/purchasing).
+// Kelola master bahan, resep produksi, daftar SO, dan cek lokasi barang (owner/admin, purchasing, gudang).
 
 import { useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { LOKASI, LOKASI_LABEL, TIPE_LABEL, searchItems, normSearch, rowFactor, fmtRp, fmtQty } from "../../lib/inventoryLogic";
 import { saveItem, saveRecipe, saveSoTemplate } from "../../lib/inventoryRepo";
 import { C, card, input, label, Btn, Chips, Notice, SearchBox, ItemPicker, QtyInput, selectInput } from "./ui";
+
+const MODES = ["Bahan", "Resep", "Daftar SO", "Cek Lokasi"];
+const OUTLETS = ["KBU", "KSM", "SMT"];
 
 const EMPTY_ITEM = { kode: "", nama: "", kategori: "", tipe: "bahan", satuan: "pcs", harga: "", lokasi: [], min_stok: "", aktif: true, catatan: "" };
 
@@ -146,11 +149,13 @@ export default function KelolaBahan({ bizId, items, recipes, templates, onChange
   const done = () => { setEditing(null); onChanged?.(); };
 
   if (editing && mode === "Bahan") return <ItemEditor bizId={bizId} item={editing.id ? editing : null} onDone={done} onCancel={() => setEditing(null)} />;
-  if (mode === "Daftar SO") {
+  if (mode === "Daftar SO" || mode === "Cek Lokasi") {
     return (
       <div style={{ display: "grid", gap: 12 }}>
-        <Chips options={["Bahan", "Resep", "Daftar SO"]} value={mode} onChange={(m) => { setEditing(null); setMode(m); }} />
-        <DaftarSo bizId={bizId} items={items || []} templates={templates || []} onChanged={onChanged} />
+        <Chips options={MODES} value={mode} onChange={(m) => { setEditing(null); setMode(m); }} />
+        {mode === "Daftar SO"
+          ? <DaftarSo bizId={bizId} items={items || []} templates={templates || []} onChanged={onChanged} />
+          : <CekLokasi bizId={bizId} items={items || []} templates={templates || []} recipes={recipes || []} onChanged={onChanged} />}
       </div>
     );
   }
@@ -158,7 +163,7 @@ export default function KelolaBahan({ bizId, items, recipes, templates, onChange
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      <Chips options={["Bahan", "Resep", "Daftar SO"]} value={mode} onChange={setMode} />
+      <Chips options={MODES} value={mode} onChange={setMode} />
       {mode === "Bahan" ? (
         <>
           <Btn kind="ghost" onClick={() => setEditing({})}>+ Tambah bahan</Btn>
@@ -344,5 +349,66 @@ function DaftarSo({ bizId, items, templates, onChanged }) {
         {!rows.length && <div style={{ padding: 14, fontSize: 13, color: C.sub }}>Belum ada daftar SO untuk lokasi ini — form SO memakai semua bahan lokasi.</div>}
       </div>
     </>
+  );
+}
+
+/**
+ * Barang yang terdaftar di outlet (inv_items.lokasi) tapi tidak ada di daftar SO outlet itu — mis. bahan produksi
+ * gudang (ceker, kulit dimsum) yang ikut tercatat di outlet. Staf outlet sudah tidak melihatnya; di sini owner/gudang
+ * bisa merapikan master dengan menghapus outlet dari lokasi barang.
+ */
+function CekLokasi({ bizId, items, templates, recipes, onChanged }) {
+  const [lok, setLok] = useState("KBU");
+  const [tipe, setTipe] = useState("produksi");
+  const [busy, setBusy] = useState(null);
+  const [err, setErr] = useState("");
+  const bahanProduksi = useMemo(() => new Set((recipes || []).flatMap((r) => (r.lines || []).map((l) => l.item_id))), [recipes]);
+  const diDaftar = useMemo(() => new Set((templates || []).filter((t) => t.lokasi === lok && t.aktif !== false).map((t) => t.item_id)), [templates, lok]);
+  const list = useMemo(() => (items || [])
+    .filter((i) => i.aktif !== false && Array.isArray(i.lokasi) && i.lokasi.includes(lok) && !diDaftar.has(i.id))
+    .filter((i) => (tipe === "produksi" ? bahanProduksi.has(i.id) : tipe === "kemasan" ? ["kemasan", "lainnya"].includes(i.tipe) : !bahanProduksi.has(i.id) && !["kemasan", "lainnya"].includes(i.tipe)))
+    .sort((a, b) => a.nama.localeCompare(b.nama)), [items, lok, tipe, diDaftar, bahanProduksi]);
+
+  const lepas = async (it) => {
+    setBusy(it.id); setErr("");
+    try {
+      await saveItem(bizId, { ...it, lokasi: it.lokasi.filter((l) => l !== lok) });
+      await onChanged?.();
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      <Notice>
+        Barang yang tercatat ada di outlet tapi <b>tidak ada di daftar SO outlet</b>. Staf outlet sudah tidak melihatnya di SO/Waste.
+        Kalau barang itu memang tidak dipakai di outlet (mis. bahan produksi gudang), tekan <b>Lepas dari {lok}</b>. Kalau dipakai, tambahkan ke Daftar SO.
+      </Notice>
+      <div style={{ ...card, display: "grid", gap: 8 }}>
+        <Chips options={OUTLETS} value={lok} onChange={setLok} getLabel={(l) => LOKASI_LABEL[l] || l} />
+        <Chips options={["produksi", "lain", "kemasan"]} value={tipe} onChange={setTipe}
+          getLabel={(t) => ({ produksi: "Bahan produksi gudang", lain: "Bahan lain", kemasan: "Kemasan & kebersihan" })[t]} />
+      </div>
+      {err && <Notice kind="bad">{err}</Notice>}
+      <div style={{ ...card, padding: 0 }}>
+        <div style={{ padding: "12px 14px 6px", fontWeight: 800 }}>{list.length} barang</div>
+        {list.map((it) => (
+          <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", borderTop: `1px solid ${C.line}`, opacity: busy === it.id ? 0.5 : 1 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{it.nama}</div>
+              <div style={{ fontSize: 12, color: C.sub }}>{it.kode} · {it.satuan} · lokasi: {it.lokasi.join(", ")}</div>
+            </div>
+            <button type="button" disabled={!!busy} onClick={() => lepas(it)}
+              style={{ flex: "0 0 auto", border: `1px solid ${C.line}`, background: "#fff", color: C.bad, borderRadius: 10, padding: "7px 10px", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>
+              Lepas dari {lok}
+            </button>
+          </div>
+        ))}
+        {!list.length && <div style={{ padding: "4px 14px 14px", fontSize: 13, color: C.sub }}>Tidak ada. Lokasi barang di outlet ini sudah sesuai daftar SO.</div>}
+      </div>
+    </div>
   );
 }

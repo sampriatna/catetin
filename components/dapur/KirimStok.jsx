@@ -82,7 +82,8 @@ export default function KirimStok({ bizId, user, access, items, templates, onSav
   }
 
   // Kasir hanya melihat kiriman untuk outletnya; manajer melihat semua.
-  const scoped = list.filter((t) => seeAll || t.ke === myOutlet || t.dari === myOutlet);
+  // Outlet hanya melihat kiriman outletnya dan bagiannya (dapur/bar); kiriman tanpa bagian terlihat keduanya.
+  const scoped = list.filter((t) => seeAll || ((t.ke === myOutlet || t.dari === myOutlet) && (!acc.area || !t.area || t.area === acc.area)));
   const groups = [
     ["diminta", scoped.filter((t) => t.status === "diminta")],
     ["dikirim", scoped.filter((t) => t.status === "dikirim")],
@@ -140,7 +141,7 @@ function TransferCard({ t, itemsById, canKirim, canTerima, canBatal, onKirim, on
       <button type="button" onClick={() => setOpen(!open)}
         style={{ width: "100%", textAlign: "left", padding: "10px 14px", border: "none", background: "#fff", cursor: "pointer" }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-          <span style={{ fontWeight: 700, fontSize: 14 }}>{t.dari} → {t.ke}</span>
+          <span style={{ fontWeight: 700, fontSize: 14 }}>{t.dari} → {t.ke}{t.area ? ` · ${t.area === "dapur" ? "Dapur" : "Bar"}` : ""}</span>
           <StatusPill status={t.status} />
         </div>
         <div style={{ fontSize: 12, color: C.sub }}>
@@ -234,7 +235,7 @@ function FormBaru({ bizId, user, access, action, items, templates, itemsById, on
       if (fotos.length) { setBusy("Upload foto…"); foto = await uploadFotos(bizId, refId.current, fotos, tanggal); }
       setBusy("Menyimpan…");
       const res = await saveTransfer(bizId, action, {
-        client_ref: refId.current, dari: "GDG", ke, tanggal, catatan, by_name: user?.name, foto,
+        client_ref: refId.current, dari: "GDG", ke, tanggal, catatan, by_name: user?.name, foto, area: effArea,
       }, lines);
       const wl = lines.map((l) => ({ nama: l.label, satuan: l.satuan, [action === "minta" ? "qty_minta" : "qty_kirim"]: l.qty }));
       const total = round2(lines.reduce((s, l) => s + transferLineNilai(l.qty, l.isi, itemsById[l.item_id]?.harga), 0));

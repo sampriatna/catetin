@@ -51,7 +51,11 @@ export default function GerakForm({ mode = "waste", bizId, user, access, lokasi,
   const areaPilih = access ? access.areaPilih : true;
   const sumberList = access?.masukSumber ? MASUK_SUMBER.filter((x) => access.masukSumber.includes(x.id)) : MASUK_SUMBER;
   const effArea = hasArea ? area : null;
-  const pickRows = useMemo(() => rowsForArea(allRows, effArea), [allRows, effArea]);
+  const pickRows = useMemo(() => {
+    const r = rowsForArea(allRows, effArea);
+    // Staf outlet: hanya barang di daftar SO outletnya (kalau daftarnya ada).
+    return access?.hanyaDaftarSo && r.some((x) => x.template) ? r.filter((x) => x.template) : r;
+  }, [allRows, effArea, access?.hanyaDaftarSo]);
 
   const [lines, setLines] = useState([]); // { row, qty, unit, alasan }
   const [shift, setShift] = useState("Tutup");

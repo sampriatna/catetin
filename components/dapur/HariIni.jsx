@@ -54,11 +54,11 @@ export default function HariIni({ bizId, user, access, lokasi, items, snapshot, 
 
   useEffect(() => {
     let alive = true;
-    loadDapurToday(bizId, { lokasi: scopeLokasi, today })
+    loadDapurToday(bizId, { lokasi: scopeLokasi, today, area: acc.isOutlet ? acc.area : null })
       .then((d) => alive && setData(d))
       .catch((e) => alive && setErr(e.message || String(e)));
     return () => { alive = false; };
-  }, [bizId, scopeLokasi, today]);
+  }, [bizId, scopeLokasi, today, acc.isOutlet, acc.area]);
 
   const st = useMemo(() => (data ? summarizeDapurToday({ ...data, lokasi: scopeLokasi, userId: user?.id, today }) : null), [data, scopeLokasi, user?.id, today]);
   const masukHariIni = useMemo(() => (data?.events || []).filter((e) => e.jenis === "masuk"), [data]);
@@ -77,6 +77,8 @@ export default function HariIni({ bizId, user, access, lokasi, items, snapshot, 
   if (!st) return <div style={{ padding: 30, textAlign: "center", color: C.sub }}>Memuat…</div>;
 
   const areaName = acc.area === "dapur" ? "Dapur" : "Bar";
+  // Lokasi yang belum pernah di-SO: tugas pertama adalah SO awal (dasar stok & nilai awal).
+  const belumPernahSo = (l) => !(snapshot || []).some((r) => r.lokasi === l);
   const extraActions = [
     acc.can(CAP.WASTE) && { tab: "waste", label: "+ Catat waste" },
     acc.can(CAP.PRODUKSI) && { tab: "produksi", label: "+ Produksi" },
@@ -95,7 +97,7 @@ export default function HariIni({ bizId, user, access, lokasi, items, snapshot, 
 
         {acc.isOutlet && (
           <>
-            <Task done={!!soArea} title={`SO ${areaName} akhir shift`}
+            <Task done={!!soArea} title={belumPernahSo(acc.outlet) ? `SO awal ${areaName}` : `SO ${areaName} akhir shift`}
               sub={soArea ? `Terkirim ${fmtJam(soArea.created_at)} · ${soArea.created_by_name || "—"}` : "Belum SO hari ini"}
               onClick={() => onGo("so")} />
             {st.kirimanMasuk > 0 && (
@@ -106,7 +108,7 @@ export default function HariIni({ bizId, user, access, lokasi, items, snapshot, 
 
         {doesGudang && (
           <>
-            <Task done={st.soMine || st.soCount > 0} title="SO Gudang"
+            <Task done={st.soMine || st.soCount > 0} title={belumPernahSo("GDG") ? "SO awal Gudang (hitung semua barang)" : "SO Gudang"}
               sub={st.soMine ? `Terkirim ${fmtJam(st.soMineAt)}` : st.soCount ? `Sudah SO ${fmtJam(st.soLast?.created_at)} (${st.soLast?.created_by_name || "—"})` : "Belum SO hari ini"}
               onClick={() => onGo("so")} />
             {st.permintaanMenunggu > 0 && (
