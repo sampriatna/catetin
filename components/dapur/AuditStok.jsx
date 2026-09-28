@@ -5,10 +5,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  LOKASI, LOKASI_LABEL, PRIORITY, PRIORITY_LABEL, auditMovements, todayJakarta, fmtRp, fmtQty,
+  LOKASI, LOKASI_LABEL, OUTLET_JUAL, PRIORITY, PRIORITY_LABEL, auditMovements, daysBetween, salesUsageReport, usageMessage, todayJakarta, fmtRp, fmtQty,
 } from "../../lib/inventoryLogic";
-import { loadStockMovements } from "../../lib/inventoryRepo";
-import { C, card, Chips, Notice } from "./ui";
+import { loadStockMovements, loadSalesUploads } from "../../lib/inventoryRepo";
+import { C, card, dateInput, label, Chips, Notice } from "./ui";
 
 function addDays(ymd, n) {
   const d = new Date(`${ymd}T00:00:00Z`);
@@ -16,19 +16,33 @@ function addDays(ymd, n) {
   return d.toISOString().slice(0, 10);
 }
 
+/** Hari-hari per outlet yang punya rekap penjualan harian ("KBU|2026-09-01"). */
+export function salesDaysFrom(uploads) {
+  const set = new Set();
+  for (const u of uploads || []) {
+    if (!u.per_hari) continue;
+    const days = [u.dari, ...daysBetween(u.dari, u.sampai)];
+    for (const l of u.lokasi || []) for (const d of days) set.add(`${l}|${d}`);
+  }
+  return set;
+}
+
 /** Muat pergerakan 21 hari, audit 7 hari terakhir (riwayat sebelumnya dipakai sebagai pola normal). */
 export function useStockAudit(bizId, items, { days = 7 } = {}) {
-  const [state, setState] = useState({ loading: true, err: "", findings: [], ledger: [] });
+  const [state, setState] = useState({ loading: true, err: "", findings: [], ledger: [], uploads: [] });
   const itemsById = useMemo(() => Object.fromEntries((items || []).map((i) => [i.id, i])), [items]);
   const load = useCallback(async () => {
     if (!bizId) return;
     const today = todayJakarta();
     try {
-      const mv = await loadStockMovements(bizId, addDays(today, -20), today);
-      const { findings, ledger } = auditMovements(mv, itemsById, { from: addDays(today, -(days - 1)) });
-      setState({ loading: false, err: "", findings, ledger });
+      const [mv, uploads] = await Promise.all([
+        loadStockMovements(bizId, addDays(today, -20), today),
+        loadSalesUploads(bizId).catch(() => []),
+      ]);
+      const { findings, ledger } = auditMovements(mv, itemsById, { from: addDays(today, -(days - 1)), salesDays: salesDaysFrom(uploads) });
+      setState({ loading: false, err: "", findings, ledger, uploads });
     } catch (e) {
-      setState({ loading: false, err: e.message || String(e), findings: [], ledger: [] });
+      setState({ loading: false, err: e.message || String(e), findings: [], ledger: [], uploads: [] });
     }
   }, [bizId, itemsById, days]);
   useEffect(() => { load(); }, [load]);
@@ -85,8 +99,11 @@ export default function AuditStok({ bizId, items }) {
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <Notice>
-        <b>Mode pemantauan harian</b> — dihitung dari SO, waste, barang masuk, produksi, dan kiriman 7 hari terakhir. Data penjualan belum dipakai, jadi temuan "berkurang" berstatus <i>menunggu data penjualan</i>. Angka SO staf tidak diubah.
+        <b>Audit harian</b> — dihitung dari SO, waste, barang masuk, produksi, kiriman{audit.uploads.some((u) => u.per_hari) ? ", dan penjualan harian" : ""} 7 hari terakhir.
+        {audit.uploads.some((u) => u.per_hari) ? " Hari tanpa rekap penjualan harian" : " Belum ada rekap penjualan harian, jadi temuan"} "berkurang" berstatus <i>menunggu data penjualan</i>. Angka SO staf tidak diubah.
       </Notice>
+
+      <UsageReport bizId={bizId} itemsById={itemsById} uploads={audit.uploads} />
 
       <div style={{ ...card, display: "grid", gap: 10 }}>
         <div style={{ display: "flex", gap: 6, overflowX: "auto" }}>
@@ -128,18 +145,118 @@ export default function AuditStok({ bizId, items }) {
                 </div>
                 {ledgerFor(f).map((l) => (
                   <div key={`${l.tanggal}-${l.cur}-${l.expected}`} style={{ display: "grid", gridTemplateColumns: "auto repeat(5, 1fr)", gap: "4px 8px", padding: "3px 0" }}>
-                    <span>{l.tanggal.slice(5)}</span><span>{fmtQty(l.prev)}</span><span>{fmtQty(l.masuk)}</span><span>{fmtQty(l.keluar)}</span>
+                    <span>{l.tanggal.slice(5)}</span><span>{fmtQty(l.prev)}</span><span>{fmtQty(l.masuk)}</span><span>{fmtQty(l.keluar + (l.jual || 0))}</span>
                     <span>{fmtQty(l.expected)}</span>
                     <span style={{ fontWeight: 800, color: l.variance > 0 ? C.warn : C.ink }}>{fmtQty(l.cur)}</span>
                   </div>
                 ))}
-                <div style={{ color: C.sub, marginTop: 6 }}>Satuan: {itemsById[f.item_id]?.satuan}. "Keluar" = waste + dipakai produksi + dikirim.</div>
+                <div style={{ color: C.sub, marginTop: 6 }}>Satuan: {itemsById[f.item_id]?.satuan}. "Keluar" = waste + dipakai produksi + dikirim + terjual (penjualan harian × resep).</div>
               </div>
             )}
           </div>
         ))}
         {!list.length && <div style={{ padding: "4px 14px 14px", fontSize: 13, color: C.sub }}>Tidak ada temuan. SO minimal 2 kali per barang supaya bisa dibandingkan.</div>}
       </div>
+    </div>
+  );
+}
+
+/** Penjualan vs pemakaian: teori (terjual × resep menu) dibanding aktual (SO) per bahan per outlet. */
+function UsageReport({ bizId, itemsById, uploads }) {
+  const today = todayJakarta();
+  const periods = useMemo(() => {
+    const seen = new Set();
+    const out = [{ id: "7", label: "7 hari terakhir", from: addDays(today, -6), to: today }];
+    for (const u of uploads || []) {
+      const k = `${u.dari}|${u.sampai}`;
+      if (seen.has(k) || u.dari === u.sampai) continue;
+      seen.add(k);
+      out.push({ id: k, label: `${u.dari.slice(5)} s/d ${u.sampai.slice(5)}`, from: u.dari, to: u.sampai });
+    }
+    return out.slice(0, 6);
+  }, [uploads, today]);
+  const [pid, setPid] = useState(null);
+  const [custom, setCustom] = useState(null);
+  const [lok, setLok] = useState("Semua");
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState("");
+  const [open, setOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+
+  useEffect(() => { if (!pid && periods.length) setPid(periods[1]?.id || periods[0].id); }, [periods, pid]);
+  const period = custom || periods.find((p) => p.id === pid) || periods[0];
+
+  useEffect(() => {
+    if (!open || !period) return;
+    let alive = true;
+    setRows(null); setErr("");
+    loadStockMovements(bizId, addDays(period.from, -21), period.to)
+      .then((mv) => alive && setRows(salesUsageReport(mv, itemsById, { from: period.from, to: period.to })))
+      .catch((e) => alive && setErr(e.message || String(e)));
+    return () => { alive = false; };
+  }, [bizId, itemsById, period?.from, period?.to, open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const list = (rows || []).filter((r) => lok === "Semua" || r.lokasi === lok);
+  const important = list.filter((r) => r.priority !== "INFO");
+  const shown = showAll ? list : important;
+  const totalLebih = list.filter((r) => r.selisih > 0).reduce((s, r) => s + r.rp, 0);
+  const hasSales = (uploads || []).length > 0;
+
+  return (
+    <div style={{ ...card, padding: 0 }}>
+      <button type="button" onClick={() => setOpen(!open)}
+        style={{ display: "flex", justifyContent: "space-between", width: "100%", border: "none", background: "#fff", padding: "12px 14px", cursor: "pointer", borderRadius: 14 }}>
+        <span style={{ fontWeight: 800 }}>Penjualan vs Pemakaian bahan</span>
+        <span style={{ color: C.brand, fontWeight: 800, fontSize: 12 }}>{open ? "Tutup" : "Buka"}</span>
+      </button>
+      {open && (
+        <div style={{ display: "grid", gap: 10, padding: "0 14px 12px" }}>
+          {!hasSales && <Notice kind="warn">Belum ada data penjualan. Upload di tab <b>Penjualan</b>.</Notice>}
+          <Chips options={periods.map((p) => p.id)} value={custom ? null : pid} getLabel={(id) => periods.find((p) => p.id === id)?.label}
+            onChange={(v) => { setCustom(null); setPid(v); }} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <div><span style={label}>Dari</span><input type="date" value={period?.from || ""} style={dateInput}
+              onChange={(e) => setCustom({ id: "c", from: e.target.value, to: period?.to || today })} /></div>
+            <div><span style={label}>Sampai</span><input type="date" value={period?.to || ""} style={dateInput}
+              onChange={(e) => setCustom({ id: "c", from: period?.from || today, to: e.target.value })} /></div>
+          </div>
+          <Chips options={["Semua", ...OUTLET_JUAL]} value={lok} onChange={setLok} />
+          {err && <Notice kind="bad">{err}</Notice>}
+          {!rows && !err && <div style={{ color: C.sub, fontSize: 13 }}>Menghitung…</div>}
+          {rows && (
+            <>
+              <div style={{ fontSize: 13 }}>
+                {list.length ? <>{list.length} bahan dihitung · <b>{important.length}</b> perlu diperiksa{totalLebih > 0 ? <> · pemakaian melebihi resep senilai <b>{fmtRp(totalLebih)}</b></> : null}</> : "Belum ada bahan yang bisa dibandingkan (butuh resep menu, penjualan, dan minimal 2 SO)."}
+              </div>
+              {shown.map((r) => {
+                const it = itemsById[r.item_id];
+                const [bg, fg] = PRIORITY_COLOR[r.priority] || PRIORITY_COLOR.INFO;
+                return (
+                  <div key={`${r.lokasi}-${r.item_id}`} style={{ borderTop: `1px solid ${C.line}`, paddingTop: 8, display: "grid", gap: 4 }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                      <span style={{ background: bg, color: fg, fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 999 }}>{PRIORITY_LABEL[r.priority]}</span>
+                      <span style={{ fontWeight: 800, fontSize: 14 }}>{it?.nama}</span>
+                      <span style={{ fontSize: 12, color: C.sub }}>· {r.lokasi}</span>
+                      {r.rp ? <span style={{ fontSize: 12, fontWeight: 800, color: r.rp > 0 ? C.bad : C.sub, marginLeft: "auto" }}>{r.rp > 0 ? "+" : "−"}{fmtRp(Math.abs(r.rp))}</span> : null}
+                    </div>
+                    <div style={{ fontSize: 13, lineHeight: 1.45 }}>{usageMessage(r, it)}</div>
+                    {r.aktual !== null && (
+                      <div style={{ fontSize: 11, color: C.sub }}>
+                        SO {r.awalTgl} {fmtQty(r.awal)} + masuk {fmtQty(r.masuk)} − keluar {fmtQty(r.keluar)} − SO {r.akhirTgl} {fmtQty(r.akhir)} = {fmtQty(r.aktual)} {it?.satuan} · keyakinan {r.confidence === "HIGH" ? "tinggi" : r.confidence === "MEDIUM" ? "sedang" : "rendah"}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {list.length > important.length && (
+                <button type="button" onClick={() => setShowAll(!showAll)} style={{ border: "none", background: "none", color: C.brand, fontWeight: 800, fontSize: 12, cursor: "pointer", textAlign: "left", padding: 0 }}>
+                  {showAll ? "Hanya yang perlu diperiksa" : `Tampilkan semua (${list.length})`}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
