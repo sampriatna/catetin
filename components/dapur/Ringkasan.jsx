@@ -26,6 +26,8 @@ export default function Ringkasan({ bizId, items, snapshot, events, lokasiScope,
 
   const snap = useMemo(() => (snapshot || []).filter((r) => scope.includes(r.lokasi)), [snapshot, scope]);
   const values = useMemo(() => stockValueByLokasi(snap), [snap]);
+  // Lokasi tanpa SO sama sekali: nilai "belum dihitung" (bukan Rp0, karena 0 berarti data valid bernilai nol).
+  const soLokasi = useMemo(() => new Set(snap.map((r) => r.lokasi)), [snap]);
   const alerts = useMemo(() => snap
     // Status hanya bila SO tersimpan dalam satuan master (konversi sudah diatur).
     .map((r) => ({ ...r, item: byId[r.item_id], status: (r.satuan || byId[r.item_id]?.satuan) === byId[r.item_id]?.satuan ? stockStatus(r.qty, byId[r.item_id]?.min_stok) : null }))
@@ -58,14 +60,16 @@ export default function Ringkasan({ bizId, items, snapshot, events, lokasiScope,
           {scope.map((l) => (
             <div key={l} style={{ background: C.bg, borderRadius: 10, padding: 10 }}>
               <div style={{ fontSize: 11, color: C.sub, fontWeight: 700 }}>{LOKASI_LABEL[l]}</div>
-              <div style={{ fontSize: 16, fontWeight: 800 }}>{fmtRp(values[l])}</div>
+              {soLokasi.has(l)
+                ? <div style={{ fontSize: 16, fontWeight: 800 }}>{fmtRp(values[l])}</div>
+                : <div style={{ fontSize: 13, fontWeight: 700, color: C.sub, padding: "3px 0" }}>Belum dihitung</div>}
               {waste7[l] ? <div style={{ fontSize: 11, color: C.bad }}>Waste 7 hari {fmtRp(waste7[l])}</div> : null}
             </div>
           ))}
         </div>
         {scope.length > 1 && (
           <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", fontWeight: 800 }}>
-            <span>Total</span><span>{fmtRp(values.total)}</span>
+            <span>Total</span><span>{soLokasi.size ? fmtRp(values.total) : "Belum dihitung"}</span>
           </div>
         )}
         <div style={{ fontSize: 11, color: C.sub, marginTop: 8 }}>
@@ -73,8 +77,10 @@ export default function Ringkasan({ bizId, items, snapshot, events, lokasiScope,
         </div>
       </div>
 
+      {/* Kartu stok minimum baru berarti setelah ada SO yang bisa dijadikan dasar. */}
+      {snap.length > 0 && (
       <div style={card}>
-        <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Perlu diisi ulang ({alerts.length})</div>
+        <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Perlu diisi ulang{alerts.length ? ` (${alerts.length})` : ""}</div>
         {alerts.length === 0 ? (
           <div style={{ fontSize: 13, color: C.sub }}>Tidak ada bahan di bawah stok minimum (berdasarkan SO terakhir).</div>
         ) : alerts.slice(0, 30).map((a) => (
@@ -86,6 +92,7 @@ export default function Ringkasan({ bizId, items, snapshot, events, lokasiScope,
           </div>
         ))}
       </div>
+      )}
 
       <div style={{ ...card, padding: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 800, padding: "12px 14px 6px" }}>Riwayat input</div>

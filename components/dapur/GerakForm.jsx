@@ -42,11 +42,14 @@ function RowPicker({ rows, excludeKeys, onPick }) {
   );
 }
 
-export default function GerakForm({ mode = "waste", bizId, user, lokasi, items, templates, prefill, onPrefillUsed, onSaved }) {
+export default function GerakForm({ mode = "waste", bizId, user, access, lokasi, items, templates, prefill, onPrefillUsed, onSaved }) {
   const waste = mode === "waste";
   const allRows = useMemo(() => buildSoRows(items, templates, lokasi), [items, templates, lokasi]);
   const hasArea = allRows.some((r) => r.area);
-  const [area, setArea] = useState(() => defaultArea(user));
+  // Area & asal barang mengikuti penugasan akun (lib/dapurAccess.js).
+  const [area, setArea] = useState(() => (access ? access.area : defaultArea(user)));
+  const areaPilih = access ? access.areaPilih : true;
+  const sumberList = access?.masukSumber ? MASUK_SUMBER.filter((x) => access.masukSumber.includes(x.id)) : MASUK_SUMBER;
   const effArea = hasArea ? area : null;
   const pickRows = useMemo(() => rowsForArea(allRows, effArea), [allRows, effArea]);
 
@@ -55,6 +58,7 @@ export default function GerakForm({ mode = "waste", bizId, user, lokasi, items, 
   const [sumber, setSumber] = useState("pembelian");
   const [tanggal, setTanggal] = useState(todayJakarta());
   const [catatan, setCatatan] = useState("");
+  const [editMeta, setEditMeta] = useState(false);
   const [fotos, setFotos] = useState([]);
   const [fromWa, setFromWa] = useState(null);
   const [busy, setBusy] = useState("");
@@ -136,25 +140,38 @@ export default function GerakForm({ mode = "waste", bizId, user, lokasi, items, 
         {!waste && (
           <div>
             <span style={label}>Asal barang</span>
-            <Chips options={MASUK_SUMBER.map((s) => s.id)} value={sumber} onChange={setSumber} getLabel={(id) => MASUK_SUMBER.find((s) => s.id === id)?.label} />
+            <Chips options={sumberList.map((s) => s.id)} value={sumber} onChange={setSumber} getLabel={(id) => MASUK_SUMBER.find((s) => s.id === id)?.label} />
           </div>
         )}
-        {hasArea && (
-          <div>
-            <span style={label}>Daftar</span>
-            <AreaChips value={area} onChange={setArea} />
-          </div>
+        {/* Tanggal, shift, dan daftar otomatis; pilihan lengkap dibuka saat ditekan. */}
+        <button type="button" onClick={() => setEditMeta(!editMeta)}
+          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, border: "none", background: "none", padding: 0, cursor: "pointer", textAlign: "left", color: C.ink }}>
+          <span style={{ fontSize: 13 }}>
+            <b>{tanggal === todayJakarta() ? "Hari ini" : tanggal}</b>{waste ? <> · Shift <b>{shift}</b></> : null}
+            {hasArea && effArea ? <> · {effArea === "dapur" ? "Daftar Dapur" : "Daftar Bar"}</> : null}
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 800, color: C.brand }}>{editMeta ? "Tutup" : "Ubah"}</span>
+        </button>
+        {editMeta && (
+          <>
+            {hasArea && areaPilih && (
+              <div>
+                <span style={label}>Daftar</span>
+                <AreaChips value={area} onChange={setArea} />
+              </div>
+            )}
+            {waste && (
+              <div>
+                <span style={label}>Shift</span>
+                <Chips options={SHIFTS} value={shift} onChange={setShift} />
+              </div>
+            )}
+            <div>
+              <span style={label}>Tanggal</span>
+              <input type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} style={dateInput} />
+            </div>
+          </>
         )}
-        {waste && (
-          <div>
-            <span style={label}>Shift</span>
-            <Chips options={SHIFTS} value={shift} onChange={setShift} />
-          </div>
-        )}
-        <div>
-          <span style={label}>Tanggal</span>
-          <input type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} style={dateInput} />
-        </div>
       </div>
 
       {fromWa && (

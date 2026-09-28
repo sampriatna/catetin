@@ -7,11 +7,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, ChevronRight, Circle, AlertTriangle } from "lucide-react";
 import {
-  LOKASI, LOKASI_LABEL, PRIORITY, PRIORITY_LABEL, canManageMaster, isOutletLocked, summarizeDapurToday, soAreaStatus, stockStatus, todayJakarta, fmtJam, fmtRp, fmtQty,
+  LOKASI, LOKASI_LABEL, PRIORITY, PRIORITY_LABEL, summarizeDapurToday, soAreaStatus, stockStatus, todayJakarta, fmtJam, fmtRp, fmtQty,
 } from "../../lib/inventoryLogic";
 import { loadDapurToday } from "../../lib/inventoryRepo";
 import { C, card, Notice } from "./ui";
 import StockValueCard from "./StockValueCard";
+import { CAP, dapurAccess } from "../../lib/dapurAccess";
 import { useStockAudit, FindingRow, PRIORITY_COLOR } from "./AuditStok";
 
 function Task({ done, urgent, title, sub, onClick }) {
@@ -31,10 +32,22 @@ function Task({ done, urgent, title, sub, onClick }) {
   );
 }
 
-export default function HariIni({ bizId, user, lokasi, items, snapshot, onGo }) {
-  const role = user?.role || "kasir";
-  const manager = role === "owner" || role === "admin";
-  const scopeLokasi = isOutletLocked(role) ? lokasi : role === "purchasing" ? "GDG" : null;
+function ActionChip({ label: text, onClick }) {
+  return (
+    <button type="button" onClick={onClick}
+      style={{ flex: "1 1 auto", padding: "10px 12px", borderRadius: 12, border: `1px solid ${C.line}`, background: "#fff", color: C.ink, fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+      {text}
+    </button>
+  );
+}
+
+export default function HariIni({ bizId, user, access, lokasi, items, snapshot, onGo }) {
+  const acc = access || dapurAccess(user);
+  const manager = acc.isOwner;
+  const doesGudang = acc.can(CAP.SO) && !acc.isOutlet && !manager; // gudang / purchasing merangkap gudang
+  const doesBelanja = acc.can(CAP.BELANJA);
+  // Lokasi yang dipantau: outlet → outletnya, gudang → GDG, purchasing murni → semua (info stok minimum), owner → semua.
+  const scopeLokasi = acc.isOutlet ? acc.outlet : doesGudang ? "GDG" : null;
   const today = todayJakarta();
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
@@ -48,9 +61,10 @@ export default function HariIni({ bizId, user, lokasi, items, snapshot, onGo }) 
   }, [bizId, scopeLokasi, today]);
 
   const st = useMemo(() => (data ? summarizeDapurToday({ ...data, lokasi: scopeLokasi, userId: user?.id, today }) : null), [data, scopeLokasi, user?.id, today]);
+  const masukHariIni = useMemo(() => (data?.events || []).filter((e) => e.jenis === "masuk"), [data]);
 
   const itemsById = useMemo(() => Object.fromEntries((items || []).map((i) => [i.id, i])), [items]);
-  const alertLokasi = scopeLokasi ? [scopeLokasi] : LOKASI;
+  const alertLokasi = acc.lihatLokasi.filter((l) => !scopeLokasi || l === scopeLokasi);
   const menipis = useMemo(() => (snapshot || [])
     .filter((r) => alertLokasi.includes(r.lokasi))
     .map((r) => ({ ...r, item: itemsById[r.item_id] }))
@@ -62,67 +76,101 @@ export default function HariIni({ bizId, user, lokasi, items, snapshot, onGo }) 
   if (err) return <Notice kind="bad">Status hari ini belum bisa dimuat: {err}</Notice>;
   if (!st) return <div style={{ padding: 30, textAlign: "center", color: C.sub }}>Memuat…</div>;
 
-  const title = scopeLokasi ? `Hari ini · ${LOKASI_LABEL[scopeLokasi] || scopeLokasi}` : "Hari ini · semua lokasi";
+  const areaName = acc.area === "dapur" ? "Dapur" : "Bar";
+  const extraActions = [
+    acc.can(CAP.WASTE) && { tab: "waste", label: "+ Catat waste" },
+    acc.can(CAP.PRODUKSI) && { tab: "produksi", label: "+ Produksi" },
+    acc.can(CAP.KIRIM_MINTA) && { tab: "kirim", label: "+ Minta stok ke gudang" },
+    acc.can(CAP.KIRIM_KIRIM) && { tab: "kirim", label: "+ Kirim stok ke outlet" },
+    acc.can(CAP.MASUK) && !doesBelanja && { tab: "masuk", label: "+ Barang masuk" },
+  ].filter(Boolean);
+  const title = manager ? "Hari ini · semua lokasi" : `Hari ini · ${acc.isOutlet ? `${LOKASI_LABEL[acc.outlet] || acc.outlet} ${areaName}` : acc.label}`;
+  // SO outlet dihitung per bagian (dapur/bar); Samtaro tanpa bagian = SO apa pun di outlet itu.
+  const soArea = acc.isOutlet ? st.soByArea?.[`${acc.outlet}:${acc.area}`] || st.soByArea?.[`${acc.outlet}:`] : null;
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <div style={{ ...card, padding: 0, overflow: "hidden" }}>
         <div style={{ padding: "12px 14px 8px", fontWeight: 800 }}>{title}</div>
 
-        {scopeLokasi && (
+        {acc.isOutlet && (
           <>
-            <Task done={st.soMine} title={scopeLokasi === "GDG" ? "SO Gudang" : "SO akhir shift"}
-              sub={st.soMine ? `Terkirim ${fmtJam(st.soMineAt)}` : st.soCount ? `Akun lain sudah SO ${fmtJam(st.soLast?.created_at)} (${st.soLast?.created_by_name || "—"}) · daftar Anda belum` : "Belum SO hari ini"}
+            <Task done={!!soArea} title={`SO ${areaName} akhir shift`}
+              sub={soArea ? `Terkirim ${fmtJam(soArea.created_at)} · ${soArea.created_by_name || "—"}` : "Belum SO hari ini"}
               onClick={() => onGo("so")} />
-            {scopeLokasi !== "GDG" && (
-              <Task urgent={st.kirimanMasuk > 0} title={st.kirimanMasuk ? `Terima kiriman gudang (${st.kirimanMasuk})` : "Terima kiriman gudang"}
-                sub={st.kirimanMasuk ? "Barang sudah dikirim — cek jumlahnya lalu terima" : "Tidak ada kiriman yang menunggu"}
-                onClick={() => onGo("kirim")} />
-            )}
-            <Task urgent={scopeLokasi === "GDG" && st.permintaanMenunggu > 0}
-              title={scopeLokasi === "GDG" ? `Permintaan outlet${st.permintaanMenunggu ? ` (${st.permintaanMenunggu})` : ""}` : "Permintaan stok ke gudang"}
-              sub={scopeLokasi === "GDG"
-                ? (st.permintaanMenunggu ? "Isi jumlah yang dikirim ke outlet" : st.kirimanMasuk ? `${st.kirimanMasuk} kiriman belum diterima outlet` : "Tidak ada permintaan menunggu")
-                : (st.permintaanMenunggu ? `${st.permintaanMenunggu} permintaan belum dikirim gudang` : "Minta barang yang menipis")}
-              onClick={() => onGo("kirim")} />
-            <Task done={st.wasteCount > 0} title="Waste hari ini"
-              sub={st.wasteCount ? `${st.wasteCount} catatan · ${fmtRp(st.wasteNilai)}` : "Belum ada barang terbuang dicatat (isi kalau ada)"}
-              onClick={() => onGo("waste")} />
-            {(role === "purchasing" || role === "dapur" || canManageMaster(role)) && (
-              <Task done={st.produksiCount > 0} title="Produksi"
-                sub={st.produksiCount ? `${st.produksiCount} produksi dicatat hari ini` : "Pilih resep + jumlah batch → modal otomatis"}
-                onClick={() => onGo("produksi")} />
+            {st.kirimanMasuk > 0 && (
+              <Task urgent title={`Terima kiriman gudang (${st.kirimanMasuk})`} sub="Barang sudah dikirim — cek jumlahnya lalu terima" onClick={() => onGo("kirim")} />
             )}
           </>
         )}
 
-        {!scopeLokasi && (
+        {doesGudang && (
+          <>
+            <Task done={st.soMine || st.soCount > 0} title="SO Gudang"
+              sub={st.soMine ? `Terkirim ${fmtJam(st.soMineAt)}` : st.soCount ? `Sudah SO ${fmtJam(st.soLast?.created_at)} (${st.soLast?.created_by_name || "—"})` : "Belum SO hari ini"}
+              onClick={() => onGo("so")} />
+            {st.permintaanMenunggu > 0 && (
+              <Task urgent title={`Permintaan outlet (${st.permintaanMenunggu})`} sub="Isi jumlah yang dikirim ke outlet" onClick={() => onGo("kirim")} />
+            )}
+          </>
+        )}
+
+        {doesBelanja && (
+          <>
+            <Task title="Catat belanja hari ini" sub="Buka catatan keuangan untuk mencatat pengeluaran belanja"
+              onClick={() => { window.location.href = "/dashboard"; }} />
+            <Task done={masukHariIni.length > 0} title="Barang masuk dari pembelian"
+              sub={masukHariIni.length ? `${masukHariIni.length} catatan hari ini · ${fmtRp(masukHariIni.reduce((a, e) => a + Number(e.total_nilai || 0), 0))}` : "Catat barang yang datang supaya stok & nilainya tercatat"}
+              onClick={() => onGo("masuk")} />
+          </>
+        )}
+
+        {manager && (
           <>
             {soAreaStatus(st.soByArea).map((a) => (
               <Task key={a.label} done={!!a.event} title={`SO ${a.label}`}
                 sub={a.event ? `Terkirim ${fmtJam(a.event.created_at)} · ${a.event.created_by_name || "—"}` : "Belum ada SO hari ini"}
                 onClick={() => onGo("ringkasan")} />
             ))}
-            <Task urgent={st.permintaanMenunggu > 0} title={`Permintaan menunggu gudang (${st.permintaanMenunggu})`}
-              sub={st.kirimanMasuk ? `${st.kirimanMasuk} kiriman belum diterima outlet` : "Tidak ada kiriman di jalan"}
-              onClick={() => onGo("kirim")} />
-            <Task done={st.wasteCount === 0} urgent={st.wasteNilai > 0} title="Waste hari ini (semua lokasi)"
-              sub={st.wasteCount ? `${st.wasteCount} catatan · ${fmtRp(st.wasteNilai)}` : "Belum ada waste tercatat"}
-              onClick={() => onGo("ringkasan")} />
+            {st.permintaanMenunggu > 0 && (
+              <Task urgent title={`Permintaan menunggu gudang (${st.permintaanMenunggu})`}
+                sub={st.kirimanMasuk ? `${st.kirimanMasuk} kiriman belum diterima outlet` : "Belum diproses gudang"}
+                onClick={() => onGo("kirim")} />
+            )}
+            <div style={{ padding: "10px 14px", fontSize: 12, color: C.sub, borderBottom: `1px solid ${C.line}` }}>
+              Waste hari ini (semua lokasi): {st.wasteCount ? `${st.wasteCount} catatan · ${fmtRp(st.wasteNilai)}` : "belum ada"}
+              {st.kirimanMasuk ? ` · ${st.kirimanMasuk} kiriman di jalan` : ""}
+            </div>
           </>
+        )}
+
+        {!manager && st.wasteCount > 0 && (
+          <div style={{ padding: "10px 14px", fontSize: 12, color: C.sub }}>
+            Waste hari ini: {st.wasteCount} catatan · {fmtRp(st.wasteNilai)}
+          </div>
         )}
       </div>
 
+      {/* Aksi tambahan: bukan tugas wajib, jadi tidak ditandai "belum selesai". */}
+      {!manager && extraActions.length > 0 && (
+        <div style={{ ...card, display: "grid", gap: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: C.sub }}>Aksi lain (kalau ada)</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {extraActions.map((a) => <ActionChip key={a.tab + a.label} label={a.label} onClick={() => onGo(a.tab)} />)}
+          </div>
+        </div>
+      )}
+
       {menipis.length > 0 && (
         <div style={{ ...card, display: "grid", gap: 6 }}>
-          <div style={{ fontWeight: 800, fontSize: 14 }}>Menipis / habis (SO terakhir)</div>
+          <div style={{ fontWeight: 800, fontSize: 14 }}>{doesBelanja && !doesGudang ? "Kebutuhan: di bawah stok minimum" : "Menipis / habis (SO terakhir)"}</div>
           {menipis.map((r) => (
             <div key={`${r.lokasi}-${r.item_id}`} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13 }}>
               <span>{r.status === "habis" ? "🔴" : "🟠"} {r.item.nama}{scopeLokasi ? "" : ` · ${r.lokasi}`}</span>
               <span style={{ color: C.sub }}>{fmtQty(r.qty)} / min {fmtQty(r.item.min_stok)} {r.item.satuan}</span>
             </div>
           ))}
-          {scopeLokasi && scopeLokasi !== "GDG" && (
+          {acc.can(CAP.KIRIM_MINTA) && (
             <button type="button" onClick={() => onGo("kirim")}
               style={{ marginTop: 4, border: "none", background: C.brandSoft, color: C.brand, borderRadius: 10, padding: "9px 12px", fontWeight: 800, cursor: "pointer" }}>
               Buat permintaan stok
@@ -133,7 +181,7 @@ export default function HariIni({ bizId, user, lokasi, items, snapshot, onGo }) 
 
       {manager && <AnomaliCard bizId={bizId} items={items} onGo={onGo} />}
 
-      {(manager || role === "purchasing") && (
+      {(manager || doesGudang) && (
         <StockValueCard bizId={bizId} lokasiScope={scopeLokasi ? [scopeLokasi] : LOKASI} />
       )}
     </div>

@@ -4,11 +4,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  LOKASI, LOKASI_LABEL, TRANSFER_STATUS, allowedLokasi, canManageMaster, buildSoRows, buildTransferLines, rowsForArea, defaultArea, isOutletLocked,
+  LOKASI, LOKASI_LABEL, TRANSFER_STATUS, buildSoRows, buildTransferLines, rowsForArea,
   transferLineNilai, normSearch, parseQty, round2, makeClientRef, todayJakarta, formatTransferWa, fmtRp, fmtQty,
   parseWaStock, applyWaToRows,
 } from "../../lib/inventoryLogic";
 import { loadTransfers, saveTransfer, uploadFotos } from "../../lib/inventoryRepo";
+import { CAP, dapurAccess } from "../../lib/dapurAccess";
 import { C, card, input, label, Btn, WaButton, Chips, Notice, SearchBox, ItemPicker, QtyInput, FotoPicker, PasteWaPanel, AreaChips, dateInput } from "./ui";
 
 const STATUS_COLOR = {
@@ -32,10 +33,14 @@ function waLines(lines, itemsById) {
   }));
 }
 
-export default function KirimStok({ bizId, user, items, templates, onSaved }) {
-  const role = user?.role || "kasir";
-  const isManager = canManageMaster(role);
-  const myOutlet = String(user?.outlet || "").toUpperCase();
+export default function KirimStok({ bizId, user, access, items, templates, onSaved }) {
+  // Izin dari lib/dapurAccess.js: outlet minta & terima untuk outletnya, gudang memproses & kirim, owner semua.
+  const acc = access || dapurAccess(user);
+  const canMinta = acc.can(CAP.KIRIM_MINTA);
+  const canKirim = acc.can(CAP.KIRIM_KIRIM);
+  const seeAll = acc.can(CAP.KIRIM_SEMUA);
+  const canTerimaAll = acc.isOwner;
+  const myOutlet = acc.outlet || "";
   const itemsById = useMemo(() => Object.fromEntries((items || []).map((i) => [i.id, i])), [items]);
 
   const [list, setList] = useState([]);
@@ -64,7 +69,7 @@ export default function KirimStok({ bizId, user, items, templates, onSaved }) {
   }
 
   if (view.mode === "baru") {
-    return <FormBaru bizId={bizId} user={user} action={view.action} items={items} templates={templates}
+    return <FormBaru bizId={bizId} user={user} access={acc} action={view.action} items={items} templates={templates}
       itemsById={itemsById} onCancel={() => setView({ mode: "list" })} onDone={finish} />;
   }
   if (view.mode === "kirim") {
@@ -77,7 +82,7 @@ export default function KirimStok({ bizId, user, items, templates, onSaved }) {
   }
 
   // Kasir hanya melihat kiriman untuk outletnya; manajer melihat semua.
-  const scoped = list.filter((t) => isManager || t.ke === myOutlet || t.dari === myOutlet);
+  const scoped = list.filter((t) => seeAll || t.ke === myOutlet || t.dari === myOutlet);
   const groups = [
     ["diminta", scoped.filter((t) => t.status === "diminta")],
     ["dikirim", scoped.filter((t) => t.status === "dikirim")],
@@ -95,9 +100,9 @@ export default function KirimStok({ bizId, user, items, templates, onSaved }) {
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      <div style={{ display: "grid", gridTemplateColumns: isManager ? "1fr 1fr" : "1fr", gap: 8 }}>
-        <Btn onClick={() => setView({ mode: "baru", action: "minta" })}>+ Permintaan stok</Btn>
-        {isManager && <Btn kind="ghost" onClick={() => setView({ mode: "baru", action: "kirim" })}>+ Kirim langsung</Btn>}
+      <div style={{ display: "grid", gridTemplateColumns: canMinta && canKirim ? "1fr 1fr" : "1fr", gap: 8 }}>
+        {canMinta && <Btn onClick={() => setView({ mode: "baru", action: "minta" })}>+ Permintaan stok</Btn>}
+        {canKirim && <Btn kind={canMinta ? "ghost" : "primary"} onClick={() => setView({ mode: "baru", action: "kirim" })}>+ Kirim langsung ke outlet</Btn>}
       </div>
       {err && <Notice kind="bad">{err}</Notice>}
       {loading && !list.length && <div style={{ padding: 20, textAlign: "center", color: C.sub }}>Memuat…</div>}
@@ -106,9 +111,9 @@ export default function KirimStok({ bizId, user, items, templates, onSaved }) {
           <div style={{ fontSize: 13, fontWeight: 800, padding: "12px 14px 6px" }}>{TRANSFER_STATUS[st]} ({ts.length})</div>
           {ts.map((t) => (
             <TransferCard key={t.id} t={t} itemsById={itemsById}
-              canKirim={isManager && t.status === "diminta"}
-              canTerima={t.status === "dikirim" && (isManager || t.ke === myOutlet)}
-              canBatal={t.status === "diminta" && (isManager || t.diminta_by === user?.id)}
+              canKirim={canKirim && t.status === "diminta"}
+              canTerima={t.status === "dikirim" && (canTerimaAll || (acc.can(CAP.KIRIM_TERIMA) && t.ke === myOutlet))}
+              canBatal={t.status === "diminta" && (canKirim || t.diminta_by === user?.id)}
               onKirim={() => setView({ mode: "kirim", t })}
               onTerima={() => setView({ mode: "terima", t })}
               onBatal={() => batal(t)} />
@@ -173,9 +178,8 @@ function TransferCard({ t, itemsById, canKirim, canTerima, canBatal, onKirim, on
 
 // ── Permintaan baru (outlet) / kirim langsung (gudang) ─────
 
-function FormBaru({ bizId, user, action, items, templates, itemsById, onCancel, onDone }) {
-  const role = user?.role || "kasir";
-  const tujuanOptions = (isOutletLocked(role) ? allowedLokasi(user) : LOKASI).filter((l) => l !== "GDG");
+function FormBaru({ bizId, user, access, action, items, templates, itemsById, onCancel, onDone }) {
+  const tujuanOptions = (access.isOutlet ? [access.outlet] : LOKASI).filter((l) => l !== "GDG");
   const [ke, setKe] = useState(tujuanOptions[0] || "KBU");
   const [tanggal, setTanggal] = useState(todayJakarta());
   const [catatan, setCatatan] = useState("");
@@ -191,7 +195,7 @@ function FormBaru({ bizId, user, action, items, templates, itemsById, onCancel, 
   // Daftar barang = daftar SO outlet tujuan (nama & satuan yang dipakai staf), lalu barang lain di belakang.
   const allRows = useMemo(() => buildSoRows(items, templates, ke), [items, templates, ke]);
   const hasArea = allRows.some((r) => r.area);
-  const [area, setArea] = useState(() => defaultArea(user));
+  const [area, setArea] = useState(() => access.area);
   const effArea = hasArea ? area : null;
   const rows = useMemo(() => rowsForArea(allRows, effArea), [allRows, effArea]);
   const key = `dapur:${action}:${bizId}:${ke}:${effArea || "semua"}`;
@@ -254,7 +258,7 @@ function FormBaru({ bizId, user, action, items, templates, itemsById, onCancel, 
             ? <Chips options={tujuanOptions} value={ke} onChange={setKe} getLabel={(l) => LOKASI_LABEL[l] || l} />
             : <div style={{ fontWeight: 800 }}>{LOKASI_LABEL[ke] || ke}</div>}
         </div>
-        {hasArea && (
+        {hasArea && !access.isOutlet && (
           <div>
             <span style={label}>Daftar</span>
             <AreaChips value={area} onChange={setArea} />

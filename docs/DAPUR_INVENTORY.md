@@ -63,6 +63,21 @@ Sumber kebenaran = SO fisik. Penjualan belum dipakai (mode pemantauan harian).
 - **Audit mundur**: karena SO tidak pernah diubah dan semua pergerakan tersimpan, laporan minggu-minggu lalu bisa dibuat kapan saja; data penjualan yang di-upload belakangan ikut terpakai saat dihitung ulang.
 - **Tindak lanjut temuan**: buka temuan di tab Audit → isi hasil pengecekan → *Sudah dicek — wajar* / *Perlu tindakan* / *Sudah ditindaklanjuti* (`inv_audit_notes`). Temuan wajar/selesai tidak dihitung lagi di kartu Insight, daftar Audit, maupun laporan mingguan; *Perlu tindakan* tetap tampil.
 
+## Tampilan per peran
+
+Satu sumber izin: `lib/dapurAccess.js` (`dapurAccess(user)` → `can(cap)`, `canTab(tab)`, lokasi & area). Komponen tidak mengecek nama role sendiri. URL langsung `?tab=…` yang tidak diizinkan diarahkan ke Hari Ini dengan pesan "Menu ini tidak tersedia untuk peran kamu." Role yang tidak dikenal tidak mendapat akses.
+
+| Role di database | Profil | Menu |
+|---|---|---|
+| owner, admin | Owner | Semua: Hari Ini (ringkasan lintas lokasi), SO, Waste, Barang Masuk, Produksi, Kirim Stok, Stok & Riwayat, Audit, Penjualan, Resep Menu, Kelola; pilih lokasi & daftar bebas |
+| purchasing (outlet kosong) | Purchasing & Gudang — pengaturan Nusa Food sekarang | Hari Ini (belanja, barang masuk, SO gudang, permintaan menunggu), SO Gudang, Waste Gudang, Barang Masuk (lokasi bebas), Produksi Gudang, Kirim Stok, Stok & Riwayat |
+| purchasing + outlet `GDG`/`GUDANG` | Gudang | sama seperti di atas tanpa tugas belanja |
+| purchasing + area lain (mis. area dompet) | Purchasing | Hari Ini (catat belanja, barang masuk, stok minimum), Barang Masuk (hanya pembelian/retur, lokasi bebas), Stok & Riwayat (lihat) |
+| dapur + KBU/KSM/SMT | Outlet Dapur | Hari Ini, SO Dapur, Waste Dapur, Produksi (resep yang hasilnya ada di daftar dapur), Minta & Terima, Stok & Riwayat outletnya |
+| kasir + KBU/KSM/SMT | Outlet Bar | sama, dengan daftar bar (Samtaro: baris tanpa area = semua) |
+
+Lokasi outlet & gudang otomatis (pemilih lokasi hanya tampil bila ada lebih dari satu pilihan). Bagian dapur/bar diambil dari `inv_so_template.area`. Shift & tanggal otomatis, dibuka lewat "Ubah". Waste, produksi, dan permintaan stok ada di "Aksi lain", bukan tugas wajib; permintaan outlet dan kiriman hanya jadi tugas bila memang menunggu.
+
 ## Checklist beranda
 
 - **Kasir** (bar KBU, minuman KSM, Samtaro): tugas wajib **SO Stok Akhir Shift** di checklist harian bersama omset/SDM/sosmed. Selesai (✓) setelah akun itu mengirim SO hari ini. **Terima Kiriman Gudang** jadi mendesak kalau ada kiriman yang belum dicek.

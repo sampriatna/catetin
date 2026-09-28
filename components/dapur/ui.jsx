@@ -145,7 +145,9 @@ export function QtyInput({ value, onChange, placeholder = "0", width = 90 }) {
   return (
     <input inputMode="decimal" value={value ?? ""} placeholder={placeholder}
       onChange={(e) => onChange(e.target.value)}
-      style={{ ...input, width, textAlign: "right", padding: "9px 10px" }} />
+      style={{ ...input, width, textAlign: "right", padding: "9px 10px",
+        // Kosong (belum diisi) dibedakan dari angka 0.
+        borderStyle: String(value ?? "").trim() === "" ? "dashed" : "solid" }} />
   );
 }
 

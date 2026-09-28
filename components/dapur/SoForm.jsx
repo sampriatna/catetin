@@ -20,11 +20,13 @@ function writeDraft(key, v) {
   try { v ? localStorage.setItem(key, JSON.stringify(v)) : localStorage.removeItem(key); } catch { /* storage tidak tersedia */ }
 }
 
-export default function SoForm({ bizId, user, lokasi, items, templates, snapshot, onSaved, onWasteFromWa }) {
+export default function SoForm({ bizId, user, access, lokasi, items, templates, snapshot, onSaved, onWasteFromWa }) {
   const allRows = useMemo(() => buildSoRows(items, templates, lokasi), [items, templates, lokasi]);
   // Daftar dibagi per area (dapur / bar) bila outlet punya akun terpisah; Samtaro tanpa area = satu daftar.
   const hasArea = allRows.some((r) => r.area);
-  const [area, setArea] = useState(() => defaultArea(user));
+  // Area dari penugasan akun (dapur/bar); hanya owner yang boleh ganti daftar.
+  const [area, setArea] = useState(() => (access ? access.area : defaultArea(user)));
+  const areaPilih = access ? access.areaPilih : true;
   const effArea = hasArea ? area : null;
   const rows = useMemo(() => rowsForArea(allRows, effArea), [allRows, effArea]);
   const hasTemplate = rows.some((r) => r.template);
@@ -45,6 +47,8 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
   const [grup, setGrup] = useState("Semua");
   const [onlyEmpty, setOnlyEmpty] = useState(false);
   const [showOthers, setShowOthers] = useState(false);
+  const [editMeta, setEditMeta] = useState(false);
+  const [savedAt, setSavedAt] = useState(null);
   const [pasteInfo, setPasteInfo] = useState(null);
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
@@ -66,6 +70,7 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
   useEffect(() => {
     const filled = Object.values(counts).some((v) => String(v ?? "").trim() !== "") || extras.length > 0;
     writeDraft(key, filled ? { counts, shift, extras } : null);
+    setSavedAt(filled ? new Date() : null);
   }, [key, counts, shift, extras]);
 
   // Bahan di luar daftar SO outlet disembunyikan dulu (masih bisa dibuka) supaya daftar sama dengan kebiasaan staf.
@@ -187,21 +192,34 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
+      {/* Shift & tanggal otomatis; pilihan lengkap dibuka hanya saat ditekan. */}
       <div style={{ ...card, display: "grid", gap: 10 }}>
-        {hasArea && (
-          <div>
-            <span style={label}>Daftar</span>
-            <AreaChips value={area} onChange={setArea} />
-          </div>
+        <button type="button" onClick={() => setEditMeta(!editMeta)}
+          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, border: "none", background: "none", padding: 0, cursor: "pointer", textAlign: "left", color: C.ink }}>
+          <span style={{ fontSize: 13 }}>
+            <b>{tanggal === todayJakarta() ? "Hari ini" : tanggal}</b> · Shift <b>{shift}</b>
+            {hasArea && effArea ? <> · {effArea === "dapur" ? "Daftar Dapur" : "Daftar Bar"}</> : null}
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 800, color: C.brand }}>{editMeta ? "Tutup" : "Ubah"}</span>
+        </button>
+        {editMeta && (
+          <>
+            {hasArea && areaPilih && (
+              <div>
+                <span style={label}>Daftar</span>
+                <AreaChips value={area} onChange={setArea} />
+              </div>
+            )}
+            <div>
+              <span style={label}>Shift</span>
+              <Chips options={SHIFTS} value={shift} onChange={setShift} />
+            </div>
+            <div>
+              <span style={label}>Tanggal</span>
+              <input type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} style={dateInput} />
+            </div>
+          </>
         )}
-        <div>
-          <span style={label}>Shift</span>
-          <Chips options={SHIFTS} value={shift} onChange={setShift} />
-        </div>
-        <div>
-          <span style={label}>Tanggal</span>
-          <input type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} style={dateInput} />
-        </div>
       </div>
 
       <PasteWaPanel onApply={applyPaste} />
@@ -228,7 +246,10 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
             Tampilkan juga bahan di luar daftar SO outlet ({rows.filter((r) => !r.template).length})
           </label>
         )}
-        <div style={{ fontSize: 12, color: C.sub }}>Sudah dihitung {filledCount} dari {targetCount} bahan · isian tersimpan otomatis di HP ini</div>
+        <div style={{ fontSize: 12, color: C.sub }}>
+          Sudah dihitung <b>{filledCount}</b> dari {targetCount} bahan · kosong = belum dihitung, isi <b>0</b> atau tekan <b>Habis</b> kalau stoknya habis
+          {savedAt ? <span style={{ color: C.ok, fontWeight: 700 }}> · ✓ Tersimpan otomatis {String(savedAt.getHours()).padStart(2, "0")}.{String(savedAt.getMinutes()).padStart(2, "0")}</span> : null}
+        </div>
       </div>
 
       <div style={{ ...card, padding: 0 }}>
@@ -261,7 +282,13 @@ export default function SoForm({ bizId, user, lokasi, items, templates, snapshot
                     {it.min_stok ? ` · min ${fmtQty(it.min_stok)} ${it.satuan}` : ""}
                   </div>
                 </div>
-                <QtyInput value={raw} onChange={(v) => setCounts((c) => ({ ...c, [r.key]: v }))} />
+                {String(raw ?? "").trim() === "" && (
+                  <button type="button" onClick={() => setCounts((c) => ({ ...c, [r.key]: "0" }))} aria-label={`${r.label} habis`}
+                    style={{ flex: "0 0 auto", border: `1px solid ${C.line}`, background: "#fff", color: C.sub, borderRadius: 10, padding: "8px 8px", fontSize: 11, fontWeight: 800, cursor: "pointer" }}>
+                    Habis
+                  </button>
+                )}
+                <QtyInput value={raw} placeholder="–" onChange={(v) => setCounts((c) => ({ ...c, [r.key]: v }))} />
               </div>
             </div>
           );
