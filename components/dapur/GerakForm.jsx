@@ -100,6 +100,9 @@ export default function GerakForm({ mode = "waste", bizId, user, access, lokasi,
     if (!lines.length) { setErr("Tambahkan minimal satu barang."); return; }
     const bad = lines.filter((l) => { const q = parseQty(l.qty); return q === null || Number.isNaN(q) || q <= 0; });
     if (bad.length) { setErr(`Isi jumlah yang benar untuk: ${bad.map((l) => l.row.label).join(", ")}`); return; }
+    // Pengaman salah satuan: waste satu barang ≥ Rp1 juta hampir selalu salah ketik (gram di kolom kg, dsb.).
+    const besar = waste ? lines.filter((l) => (calc(l).nilai || 0) >= 1000000) : [];
+    if (besar.length && !window.confirm(`Nilai waste ini besar sekali:\n${besar.map((l) => `• ${l.row.label}: ${l.qty} ${l.unit} (${fmtRp(calc(l).nilai)})`).join("\n")}\n\nSatuannya sudah benar? OK = tetap simpan, Batal = perbaiki.`)) return;
     try {
       let foto = [];
       if (fotos.length) { setBusy("Upload foto…"); foto = await uploadFotos(bizId, refId.current, fotos, tanggal); }

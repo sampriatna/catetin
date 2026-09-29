@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   SHIFTS, buildSoRows, rowsForArea, defaultArea, buildSoLinesFromRows, soToItemQty, itemToSoQty, rowFactor, normSearch, parseQty,
   stockStatus, soDelta, round2, makeClientRef, todayJakarta, formatSoWa, fmtRp, fmtQty,
-  parseWaStock, applyWaToRows, wasteFromWa, countsFromSoLines, usulanPermintaan,
+  parseWaStock, applyWaToRows, wasteFromWa, countsFromSoLines, usulanPermintaan, soTidakWajar,
 } from "../../lib/inventoryLogic";
 import { loadEvents, submitEvent, uploadFotos } from "../../lib/inventoryRepo";
 import { C, card, input, label, Btn, WaButton, Chips, Notice, SearchBox, QtyInput, StatusBadge, FotoPicker, PasteWaPanel, AreaChips, dateInput } from "./ui";
@@ -186,6 +186,18 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
     if (errors.length) { setErr(`Periksa: ${errors.slice(0, 5).join(", ")}`); return; }
     if (!lines.length) { setErr("Belum ada bahan yang dihitung."); return; }
     const belum = targetCount - rows.filter((r) => (r.template || !hasTemplate) && String(counts[r.key] ?? "").trim() !== "").length;
+    // Pengaman salah ketik satuan (mis. 740 gram diisi di kolom kg → Rp28 juta).
+    const cek = soTidakWajar(rows.filter((r) => { const v = parseQty(counts[r.key]); return v !== null && !Number.isNaN(v); }).map((r) => {
+      const qSo = parseQty(counts[r.key]);
+      const conv = soToItemQty(r, qSo);
+      const last = lastByItem[r.item.id];
+      return {
+        nama: r.label, qty: qSo, satuan: r.satuan_so,
+        nilai: conv.converted ? conv.qty * (Number(r.item.harga) || 0) : 0,
+        prevQty: last && !replace ? itemToSoQty(r, last.qty, last.satuan || r.item.satuan) : null,
+      };
+    }));
+    if (cek.length && !window.confirm(`Cek lagi angka ini, sepertinya tidak wajar:\n${cek.map((c) => `• ${c.nama}: ${fmtQty(c.qty)} ${c.satuan} (${fmtRp(c.nilai)}${c.prevQty ? ` · SO lalu ${fmtQty(c.prevQty)}` : ""})`).join("\n")}\n\nSudah benar (satuannya ${cek.length > 1 ? "sudah dicek" : "sesuai"})? Tekan OK untuk tetap simpan, Batal untuk memperbaiki.`)) return;
     if (belum > 0 && !window.confirm(`${belum} bahan di daftar belum dihitung dan tidak akan disimpan. Lanjut simpan ${lines.length} bahan?`)) return;
     try {
       let foto = [];
