@@ -97,7 +97,6 @@ function Editor({ bizId, user, access, items, maps, t, onCancel, onDone }) {
       itemId: m.item?.id || null,
       isi: m.isi ? String(m.isi).replace(".", ",") : "",
       abaikan: m.status === "abaikan",
-      modal: true,
       ubah: false,
     };
   }));
@@ -138,7 +137,7 @@ function Editor({ bizId, user, access, items, maps, t, onCancel, onDone }) {
       if (stok.length) {
         // 2) Barang masuk + harga beli aktual + pembaruan modal disimpan atomik di database.
         // Satu request ini menggantikan update harga satu-per-satu setelah event tersimpan.
-        const saved = await submitEvent(bizId, {
+        await submitEvent(bizId, {
           client_ref: `belanja:${t.id}`, jenis: "masuk", sumber: "pembelian", lokasi, tanggal: t.date,
           catatan: `Dari belanja ${t.supplier || ""}${t.meta?.createdByName ? ` (${t.meta.createdByName})` : ""}`.trim(),
           created_by_name: user?.name,
@@ -146,10 +145,10 @@ function Editor({ bizId, user, access, items, maps, t, onCancel, onDone }) {
           item_id: c.it.id, qty: Math.round(c.qty * 10000) / 10000, satuan: c.it.satuan,
           qty_input: Number(r.line.qty) || 0, satuan_input: r.line.unit || null, label: r.line.name,
           unit_cost: c.harga > 0 ? Math.round(c.harga * 10000) / 10000 : null,
-          update_item_cost: !!r.modal,
+          update_item_cost: true,
         })));
-        const nCost = Number(saved?.costs_updated) || 0;
-        onDone(`${stok.length} barang masuk ke stok ${LOKASI_LABEL[lokasi] || lokasi} · harga beli tersimpan${nCost ? ` · ${nCost} modal diperbarui` : ""}.`);
+        const adaHarga = stok.some(({ c }) => c.harga > 0);
+        onDone(`${stok.length} barang masuk ke stok ${LOKASI_LABEL[lokasi] || lokasi}${adaHarga ? " · harga beli tersimpan · HPP rata-rata diperbarui" : ""}.`);
         return;
       }
       onDone("Belanja ditandai bukan barang stok.");
@@ -224,10 +223,9 @@ function Editor({ bizId, user, access, items, maps, t, onCancel, onDone }) {
               </>
             )}
             {!r.abaikan && c.ok && c.harga > 0 && (
-              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: C.sub }}>
-                <input type="checkbox" checked={r.modal} onChange={(e) => set(r.idx, { modal: e.target.checked })} />
-                Perbarui modal {c.it.nama} jadi {fmtRp(c.harga)}/{c.it.satuan}{Number(c.it.harga) > 0 ? ` (sekarang ${fmtRp(c.it.harga)})` : ""}
-              </label>
+              <div style={{ fontSize: 12, color: C.sub }}>
+                Harga nota otomatis masuk perhitungan rata-rata HPP 5 pembelian terakhir.
+              </div>
             )}
           </div>
         );
