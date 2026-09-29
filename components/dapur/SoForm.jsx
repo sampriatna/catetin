@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   SHIFTS, buildSoRows, rowsForArea, defaultArea, buildSoLinesFromRows, soToItemQty, itemToSoQty, rowFactor, normSearch, parseQty,
   stockStatus, soDelta, round2, makeClientRef, todayJakarta, formatSoWa, fmtRp, fmtQty,
-  parseWaStock, applyWaToRows, wasteFromWa, countsFromSoLines,
+  parseWaStock, applyWaToRows, wasteFromWa, countsFromSoLines, usulanPermintaan,
 } from "../../lib/inventoryLogic";
 import { loadEvents, submitEvent, uploadFotos } from "../../lib/inventoryRepo";
 import { C, card, input, label, Btn, WaButton, Chips, Notice, SearchBox, QtyInput, StatusBadge, FotoPicker, PasteWaPanel, AreaChips, dateInput } from "./ui";
@@ -22,7 +22,7 @@ function writeDraft(key, v) {
 const jam = (t) => new Date(t).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
 const UBAH_MS = 24 * 3600 * 1000; // staf outlet boleh ubah SO < 24 jam (sama dengan RPC)
 
-export default function SoForm({ bizId, user, access, lokasi, items, templates, snapshot, onSaved, onWasteFromWa }) {
+export default function SoForm({ bizId, user, access, lokasi, items, templates, snapshot, onSaved, onWasteFromWa, onBuatPermintaan }) {
   const allRows = useMemo(() => buildSoRows(items, templates, lokasi), [items, templates, lokasi]);
   // Daftar dibagi per area (dapur / bar) bila outlet punya akun terpisah; Samtaro tanpa area = satu daftar.
   const hasArea = allRows.some((r) => r.area);
@@ -149,6 +149,7 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
       if (conv.converted) total += conv.qty * (Number(r.item.harga) || 0); else belumKonversi++;
       const last = denganLalu ? lastByItem[r.item.id] : null;
       return {
+        key: r.key, satuanMaster: conv.converted ? conv.satuan : null,
         grup: hasTemplate ? r.grup : null, nama: r.label, satuan: r.satuan_so, qty: qSo,
         prevQty: last ? itemToSoQty(r, last.qty, last.satuan || r.item.satuan) : null,
         statusQty: conv.converted ? conv.qty : null, statusSatuan: conv.converted && conv.satuan !== r.satuan_so ? conv.satuan : null,
@@ -157,7 +158,7 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
     });
     total = round2(total);
     const text = formatSoWa({ lokasi, tanggal: tg, shift: sh, by: user?.name, lines: waLines, total, catatan: ct, foto, belumKonversi, tambahan, area: effArea });
-    return { text, total, count: filledRows.length };
+    return { text, total, count: filledRows.length, usulan: usulanPermintaan(waLines) };
   }
 
   /** Buka SO tersimpan di form untuk diperbaiki; simpan = ganti SO itu. */
@@ -224,6 +225,20 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
     }
   }
 
+  // Usulan permintaan → isi form Minta & Terima (jumlah dalam satuan daftar outlet; gudang tinggal proses).
+  const canMinta = !!access?.can?.("kirim.minta") && !!onBuatPermintaan;
+  const mintaSiap = (done?.usulan || []).filter((u) => u.minta > 0 && rows.some((r) => r.key === u.key));
+  function buatPermintaan() {
+    const cts = {};
+    for (const u of mintaSiap) {
+      const row = rows.find((r) => r.key === u.key);
+      const v = itemToSoQty(row, u.minta, u.satuan);
+      if (v !== null && v > 0) cts[row.key] = String(round2(v)).replace(".", ",");
+    }
+    writeDraft(`dapur:minta:${bizId}:${lokasi}:${effArea || "semua"}`, { counts: cts });
+    onBuatPermintaan();
+  }
+
   if (done) {
     const bisaUbah = done.ev?.id && (manager || Date.now() - new Date(done.ev.created_at).getTime() < UBAH_MS);
     return (
@@ -237,6 +252,9 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
           </Notice>
         )}
         <WaButton text={done.text} />
+        {canMinta && mintaSiap.length > 0 && (
+          <Btn kind="ghost" onClick={buatPermintaan}>📦 Buat permintaan ke gudang ({mintaSiap.length} barang)</Btn>
+        )}
         {bisaUbah && <Btn kind="ghost" onClick={() => ubahSo(done.ev, done.counts)}>Ubah SO ini</Btn>}
         <Btn kind="ghost" onClick={() => setDone(null)}>Selesai</Btn>
         <pre style={{ ...card, whiteSpace: "pre-wrap", fontSize: 13, margin: 0, fontFamily: "inherit" }}>{done.text}</pre>

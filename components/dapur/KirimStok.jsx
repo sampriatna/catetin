@@ -33,7 +33,7 @@ function waLines(lines, itemsById) {
   }));
 }
 
-export default function KirimStok({ bizId, user, access, items, templates, onSaved }) {
+export default function KirimStok({ bizId, user, access, items, templates, onSaved, bukaMinta = false, onDibuka }) {
   // Izin dari lib/dapurAccess.js: outlet minta & terima untuk outletnya, gudang memproses & kirim, owner semua.
   const acc = access || dapurAccess(user);
   const canMinta = acc.can(CAP.KIRIM_MINTA);
@@ -47,6 +47,12 @@ export default function KirimStok({ bizId, user, access, items, templates, onSav
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [view, setView] = useState({ mode: "list" }); // list | baru(minta|kirim) | kirim(t) | terima(t)
+  // Dari SO: form permintaan dibuka langsung (isian usulan sudah disiapkan di draft).
+  useEffect(() => {
+    if (!bukaMinta) return;
+    if (canMinta) setView({ mode: "baru", action: "minta" });
+    onDibuka?.();
+  }, [bukaMinta, canMinta, onDibuka]);
   const [done, setDone] = useState(null);
 
   const reload = useCallback(async () => {

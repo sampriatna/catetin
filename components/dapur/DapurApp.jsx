@@ -44,6 +44,7 @@ export default function DapurApp({ bizId, user, signOut }) {
   const [events, setEvents] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [wastePrefill, setWastePrefill] = useState(null);
+  const [bukaMinta, setBukaMinta] = useState(false); // dari SO: langsung buka form permintaan (sudah terisi usulan)
   const [menus, setMenus] = useState([]);
   const [aliases, setAliases] = useState([]);
   const [menuPrefill, setMenuPrefill] = useState(null);
@@ -179,7 +180,8 @@ export default function DapurApp({ bizId, user, signOut }) {
           )}
           {is("so") && (
             <SoForm bizId={bizId} user={user} access={access} lokasi={lokasi} items={items} templates={templates} snapshot={snapshot} onSaved={reload}
-              onWasteFromWa={(w) => { setWastePrefill(w); setTab("waste"); }} />
+              onWasteFromWa={(w) => { setWastePrefill(w); setTab("waste"); }}
+              onBuatPermintaan={() => { setBukaMinta(true); setTab("kirim"); }} />
           )}
           {is("waste") && (
             <GerakForm mode="waste" bizId={bizId} user={user} access={access} lokasi={lokasi} items={items} templates={templates} prefill={wastePrefill}
@@ -193,7 +195,8 @@ export default function DapurApp({ bizId, user, signOut }) {
             <ProduksiForm bizId={bizId} user={user} lokasi={lokasi} items={items}
               recipes={recipesForArea(recipes, templates, lokasi, access.area)} snapshot={snapshot} onSaved={reload} />
           )}
-          {is("kirim") && <KirimStok bizId={bizId} user={user} access={access} items={items} templates={templates} onSaved={reload} />}
+          {is("kirim") && <KirimStok bizId={bizId} user={user} access={access} items={items} templates={templates} onSaved={reload}
+            bukaMinta={bukaMinta} onDibuka={() => setBukaMinta(false)} />}
           {is("ringkasan") && (
             <Ringkasan bizId={bizId} items={items} snapshot={snapshot} events={events} lokasiScope={access.lihatLokasi}
               canDelete={access.can(CAP.HAPUS_RIWAYAT)} onChanged={reload} />
