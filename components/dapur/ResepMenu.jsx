@@ -17,8 +17,10 @@ function unitRow(item, templates, lokasi) {
   return { item, satuan_so: t?.satuan_so || item.satuan, isi: t?.isi ?? null };
 }
 
-export default function ResepMenu({ bizId, items, templates, menus, prefill, onPrefillUsed, onChanged }) {
-  const [lok, setLok] = useState("KBU");
+export default function ResepMenu({ bizId, access, items, templates, menus, prefill, onPrefillUsed, onChanged }) {
+  // Akun dapur outlet hanya melihat & mengubah menu outletnya.
+  const lokOptions = access?.isOutlet ? [access.outlet] : OUTLET_JUAL;
+  const [lok, setLok] = useState(lokOptions.includes("KBU") ? "KBU" : lokOptions[0]);
   const [q, setQ] = useState("");
   const [edit, setEdit] = useState(null);
   const itemsById = useMemo(() => Object.fromEntries((items || []).map((i) => [i.id, i])), [items]);
@@ -37,7 +39,7 @@ export default function ResepMenu({ bizId, items, templates, menus, prefill, onP
   }, [menus, lok, q]);
 
   if (edit) {
-    return <MenuEditor bizId={bizId} menu={edit} items={items} itemsById={itemsById} templates={templates}
+    return <MenuEditor bizId={bizId} menu={edit} lokOptions={lokOptions} items={items} itemsById={itemsById} templates={templates}
       onCancel={() => setEdit(null)} onSaved={() => { setEdit(null); onChanged?.(); }} />;
   }
 
@@ -50,7 +52,9 @@ export default function ResepMenu({ bizId, items, templates, menus, prefill, onP
         lalu membandingkannya dengan hasil SO.
       </Notice>
       <div style={{ ...card, display: "grid", gap: 10 }}>
-        <Chips options={OUTLET_JUAL} value={lok} onChange={setLok} getLabel={(l) => LOKASI_LABEL[l]} />
+        {lokOptions.length > 1
+          ? <Chips options={lokOptions} value={lok} onChange={setLok} getLabel={(l) => LOKASI_LABEL[l]} />
+          : <div style={{ fontWeight: 800 }}>Menu {LOKASI_LABEL[lok] || lok}</div>}
         <SearchBox value={q} onChange={setQ} placeholder="Cari menu…" />
         <Btn kind="ghost" onClick={() => setEdit({ lokasi: lok, nama: "", harga_jual: "", lines: [] })}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Plus size={16} /> Menu baru</span>
@@ -86,7 +90,7 @@ export default function ResepMenu({ bizId, items, templates, menus, prefill, onP
   );
 }
 
-function MenuEditor({ bizId, menu, items, itemsById, templates, onCancel, onSaved }) {
+function MenuEditor({ bizId, menu, lokOptions = OUTLET_JUAL, items, itemsById, templates, onCancel, onSaved }) {
   const [m, setM] = useState({ ...menu });
   const [lines, setLines] = useState(() => (menu.lines || []).map((l, i) => {
     const item = itemsById[l.item_id];
@@ -133,7 +137,7 @@ function MenuEditor({ bizId, menu, items, itemsById, templates, onCancel, onSave
     <div style={{ display: "grid", gap: 12 }}>
       <div style={{ ...card, display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 800 }}>{m.id ? "Ubah resep menu" : "Menu baru"} · {LOKASI_LABEL[m.lokasi]}</div>
-        {!m.id && <Chips options={OUTLET_JUAL} value={m.lokasi} onChange={(v) => setM({ ...m, lokasi: v })} />}
+        {!m.id && lokOptions.length > 1 && <Chips options={lokOptions} value={m.lokasi} onChange={(v) => setM({ ...m, lokasi: v })} />}
         <div>
           <span style={label}>Nama menu (sama seperti di POS lebih mudah)</span>
           <input value={m.nama} onChange={(e) => setM({ ...m, nama: e.target.value })} style={input} placeholder="Ramen Atomic" />

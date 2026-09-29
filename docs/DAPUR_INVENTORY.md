@@ -12,7 +12,7 @@ Halaman: `/dapur` (tombol di checklist kasir & purchasing, dan Pengaturan → Da
 | Produksi | semua (biasanya purchasing/gudang) | Pilih resep + jumlah batch → bahan terpakai terisi otomatis (bisa dikoreksi). Isi hasil aktual. Modal per satuan hasil = total nilai bahan ÷ hasil, dan otomatis jadi modal baru barang setengah jadi itu. |
 | Kirim Stok | semua | Pengganti form kertas "Permintaan Stok". Outlet membuat **permintaan** (daftar & satuan sama dengan daftar SO outlet, bisa tempel dari WA) → gudang **proses kirim** dengan jumlah aktual (boleh tambah barang) → outlet **cek & terima**, selisih ditandai merah dan wajib diberi catatan. Gudang juga bisa **kirim langsung** tanpa permintaan. Setiap tahap punya laporan WA dan boleh lampir foto. |
 | Stok & Riwayat | semua | Nilai stok per lokasi (SO terakhir × modal), bahan di bawah stok minimum, waste 7 hari, riwayat input. Owner/admin bisa hapus input yang salah. |
-| Kelola | owner, admin, purchasing | Master bahan (kode, satuan hitung, modal, stok minimum, lokasi), resep produksi, dan **Daftar SO** per outlet (nama staf, satuan hitung, isi konversi). Filter "konversi belum diatur" untuk melengkapi. |
+| Kelola | owner, admin, purchasing (dapur outlet: terbatas outletnya) | Master bahan (kode, satuan hitung, modal, stok minimum, lokasi), resep produksi, dan **Daftar SO** per outlet (nama staf, satuan hitung, isi konversi). Filter "konversi belum diatur" untuk melengkapi. |
 
 Setiap simpan menghasilkan teks laporan dan tombol **Kirim laporan ke WhatsApp**.
 
@@ -73,7 +73,7 @@ Satu sumber izin: `lib/dapurAccess.js` (`dapurAccess(user)` → `can(cap)`, `can
 | purchasing (outlet kosong) | Purchasing & Gudang — pengaturan Nusa Food sekarang | Hari Ini (belanja, barang masuk, SO gudang, permintaan menunggu), SO Gudang, Waste Gudang, Barang Masuk (lokasi bebas), Produksi Gudang, Kirim Stok, Stok & Riwayat, Resep Menu, Kelola |
 | purchasing + outlet `GDG`/`GUDANG` | Gudang | sama seperti di atas tanpa tugas belanja |
 | purchasing + area lain (mis. area dompet) | Purchasing | Hari Ini (catat belanja, barang masuk, stok minimum), Barang Masuk (hanya pembelian/retur, lokasi bebas), Stok & Riwayat (lihat), Resep Menu, Kelola |
-| dapur + KBU/KSM/SMT | Outlet Dapur | Hari Ini, SO Dapur, Waste Dapur, Produksi (resep yang hasilnya ada di daftar dapur), Minta & Terima, Stok & Riwayat outletnya |
+| dapur + KBU/KSM/SMT | Outlet Dapur | Hari Ini, SO Dapur, Waste Dapur, Produksi (resep yang hasilnya ada di daftar dapur), Minta & Terima, Stok & Riwayat outletnya, Resep Menu outletnya, Kelola terbatas (bahan khusus outletnya + Daftar SO bagian dapur; bahan bersama hanya lihat) — dijaga RLS `inventory_dapur_kelola_outlet` |
 | kasir + KBU/KSM/SMT | Outlet Bar | sama, dengan daftar bar (Samtaro: baris tanpa area = semua) |
 
 Purchasing boleh input di semua lokasi (keputusan owner). Kelola & Resep Menu: owner, purchasing, gudang — tidak untuk outlet.

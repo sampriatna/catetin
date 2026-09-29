@@ -203,10 +203,10 @@ export default function DapurApp({ bizId, user, signOut }) {
               onBuatResep={(p) => { setMenuPrefill(p); setTab("menu"); }} />
           )}
           {is("menu") && (
-            <ResepMenu bizId={bizId} items={items} templates={templates} menus={menus} prefill={menuPrefill}
+            <ResepMenu bizId={bizId} access={access} items={items} templates={templates} menus={menus} prefill={menuPrefill}
               onPrefillUsed={clearMenuPrefill} onChanged={reloadMenus} />
           )}
-          {is("kelola") && <KelolaBahan bizId={bizId} items={items} recipes={recipes} templates={templates} onChanged={reload} />}
+          {is("kelola") && <KelolaBahan bizId={bizId} access={access} items={items} recipes={recipes} templates={templates} onChanged={reload} />}
         </>
       )}
     </Shell>

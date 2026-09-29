@@ -66,8 +66,13 @@ function FotoKemasan({ bizId, onHasil }) {
   );
 }
 
-function ItemEditor({ bizId, item, onDone, onCancel }) {
-  const [f, setF] = useState({ ...EMPTY_ITEM, ...item, harga: item?.harga ?? "", min_stok: item?.min_stok ?? "" });
+/** outlet: akun dapur outlet — hanya bahan yang lokasinya persis outlet itu yang bisa diubah (sama dengan RLS). */
+function ItemEditor({ bizId, item, outlet = null, onDone, onCancel }) {
+  const [f, setF] = useState({
+    ...EMPTY_ITEM, ...(outlet && !item?.id ? { lokasi: [outlet] } : {}), ...item,
+    harga: item?.harga ?? "", min_stok: item?.min_stok ?? "",
+  });
+  const bisaUbah = !outlet || !item?.id || (Array.isArray(item.lokasi) && item.lokasi.length === 1 && item.lokasi[0] === outlet);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [dipakai, setDipakai] = useState(false);
@@ -90,7 +95,11 @@ function ItemEditor({ bizId, item, onDone, onCancel }) {
   }
   return (
     <div style={{ ...card, display: "grid", gap: 10 }}>
-      <div style={{ fontWeight: 800 }}>{item?.id ? "Ubah bahan" : "Tambah bahan"}</div>
+      <div style={{ fontWeight: 800 }}>{item?.id ? (bisaUbah ? "Ubah bahan" : "Lihat bahan") : "Tambah bahan"}</div>
+      {!bisaUbah && (
+        <Notice kind="warn">Bahan ini dipakai juga di lokasi lain ({(item.lokasi || []).join(", ") || "semua"}), jadi hanya owner/purchasing yang bisa mengubahnya.</Notice>
+      )}
+      <fieldset disabled={!bisaUbah} style={{ border: "none", padding: 0, margin: 0, display: "grid", gap: 10, minWidth: 0 }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 8 }}>
         <div><span style={label}>Kode</span><input style={input} value={f.kode} onChange={(e) => set("kode", e.target.value.toUpperCase())} /></div>
         <div><span style={label}>Nama baku</span><input style={input} value={f.nama} onChange={(e) => set("nama", e.target.value)} /></div>
@@ -113,6 +122,11 @@ function ItemEditor({ bizId, item, onDone, onCancel }) {
         Satuan hitung = satuan yang dipakai saat SO (mis. pcs, gr, botol). Modal harus per satuan hitung yang sama.
         {f.tipe === "setengah_jadi" ? " Modal barang setengah jadi ter-update otomatis setiap produksi." : ""}
       </div>
+      {outlet ? (
+        <div style={{ fontSize: 13, color: C.sub }}>
+          Lokasi: <b>{(f.lokasi || []).map((l) => LOKASI_LABEL[l] || l).join(", ") || "semua lokasi"}</b>{bisaUbah ? " (khusus outlet ini)" : ""}
+        </div>
+      ) : (
       <div>
         <span style={label}>Dihitung di lokasi (kosong = semua)</span>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -125,13 +139,14 @@ function ItemEditor({ bizId, item, onDone, onCancel }) {
           ))}
         </div>
       </div>
-      <FotoKemasan bizId={bizId} onHasil={(h) => {
+      )}
+      {!outlet && <FotoKemasan bizId={bizId} onHasil={(h) => {
         setF((x) => ({
           ...x,
           nama: x.nama || [h.nama_produk, h.merek].filter(Boolean).join(" "),
           catatan: catatanDenganKemasan(x.catatan, h),
         }));
-      }} />
+      }} />}
       <div>
         <span style={label}>Catatan</span>
         <input style={input} value={f.catatan || ""} onChange={(e) => set("catatan", e.target.value)} placeholder="mis. Kemasan: 760 ml (Marjan)" />
@@ -142,13 +157,16 @@ function ItemEditor({ bizId, item, onDone, onCancel }) {
       <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
         <input type="checkbox" checked={f.aktif !== false} onChange={(e) => set("aktif", e.target.checked)} /> Aktif
       </label>
+      </fieldset>
       {err && <Notice kind="bad">{err}</Notice>}
       {dipakai && f.aktif !== false && <Btn kind="ghost" onClick={nonaktifkan} disabled={busy}>Nonaktifkan bahan ini</Btn>}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        <Btn kind="ghost" onClick={onCancel}>Batal</Btn>
-        <Btn onClick={save} disabled={busy}>{busy ? "Menyimpan…" : "Simpan"}</Btn>
-      </div>
-      {item?.id && (
+      {bisaUbah ? (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <Btn kind="ghost" onClick={onCancel}>Batal</Btn>
+          <Btn onClick={save} disabled={busy}>{busy ? "Menyimpan…" : "Simpan"}</Btn>
+        </div>
+      ) : <Btn kind="ghost" onClick={onCancel}>Kembali</Btn>}
+      {item?.id && bisaUbah && (
         <button type="button" onClick={hapus} disabled={busy}
           style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, border: "none", background: "transparent", color: C.bad, fontWeight: 700, fontSize: 14, padding: 8, cursor: "pointer" }}>
           <Trash2 size={16} /> Hapus bahan
@@ -219,7 +237,10 @@ function RecipeEditor({ bizId, recipe, items, onDone, onCancel }) {
   );
 }
 
-export default function KelolaBahan({ bizId, items, recipes, templates, onChanged }) {
+export default function KelolaBahan({ bizId, access, items, recipes, templates, onChanged }) {
+  // Akun dapur outlet: hanya bahan & daftar SO outletnya (resep produksi & cek lokasi untuk owner/gudang).
+  const outlet = access?.isOutlet ? access.outlet : null;
+  const modes = outlet ? ["Bahan", "Daftar SO"] : MODES;
   const [mode, setMode] = useState("Bahan");
   const [q, setQ] = useState("");
   const [tipe, setTipe] = useState("all");
@@ -228,21 +249,22 @@ export default function KelolaBahan({ bizId, items, recipes, templates, onChange
 
   const list = useMemo(() => {
     let l = searchItems(items || [], q);
+    if (outlet) l = l.filter((i) => !Array.isArray(i.lokasi) || !i.lokasi.length || i.lokasi.includes(outlet));
     if (tipe === "cek") l = l.filter((i) => /cek/i.test(i.catatan || "") || !(Number(i.harga) > 0));
     else if (tipe === "nonaktif") l = l.filter((i) => i.aktif === false);
     else if (tipe !== "all") l = l.filter((i) => i.tipe === tipe);
     return l;
-  }, [items, q, tipe]);
+  }, [items, q, tipe, outlet]);
 
   const done = () => { setEditing(null); onChanged?.(); };
 
-  if (editing && mode === "Bahan") return <ItemEditor bizId={bizId} item={editing.id ? editing : null} onDone={done} onCancel={() => setEditing(null)} />;
+  if (editing && mode === "Bahan") return <ItemEditor bizId={bizId} item={editing.id ? editing : null} outlet={outlet} onDone={done} onCancel={() => setEditing(null)} />;
   if (mode === "Daftar SO" || mode === "Cek Lokasi") {
     return (
       <div style={{ display: "grid", gap: 12 }}>
-        <Chips options={MODES} value={mode} onChange={(m) => { setEditing(null); setMode(m); }} />
+        <Chips options={modes} value={mode} onChange={(m) => { setEditing(null); setMode(m); }} />
         {mode === "Daftar SO"
-          ? <DaftarSo bizId={bizId} items={items || []} templates={templates || []} onChanged={onChanged} />
+          ? <DaftarSo bizId={bizId} outlet={outlet} items={items || []} templates={templates || []} onChanged={onChanged} />
           : <CekLokasi bizId={bizId} items={items || []} templates={templates || []} recipes={recipes || []} onChanged={onChanged} />}
       </div>
     );
@@ -251,7 +273,7 @@ export default function KelolaBahan({ bizId, items, recipes, templates, onChange
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      <Chips options={MODES} value={mode} onChange={setMode} />
+      <Chips options={modes} value={mode} onChange={setMode} />
       {mode === "Bahan" ? (
         <>
           <Btn kind="ghost" onClick={() => setEditing({})}>+ Tambah bahan</Btn>
@@ -305,7 +327,7 @@ export default function KelolaBahan({ bizId, items, recipes, templates, onChange
 
 // ── Daftar SO per outlet: nama & satuan staf + konversi ke satuan master ──
 
-function TemplateEditor({ bizId, row, lokasi, items, templates, onDone, onCancel }) {
+function TemplateEditor({ bizId, row, lokasi, outlet = null, items, templates, onDone, onCancel }) {
   const byId = useMemo(() => Object.fromEntries(items.map((i) => [i.id, i])), [items]);
   const [f, setF] = useState({
     lokasi, label: "", grup: "", urut: "", satuan_so: "", isi: "", catatan: "", aktif: true,
@@ -324,7 +346,7 @@ function TemplateEditor({ bizId, row, lokasi, items, templates, onDone, onCancel
 
   // Baris outlet lain untuk bahan & satuan hitung yang sama yang belum punya konversi.
   const saudara = useMemo(() => (templates || []).filter((t) =>
-    item && t.item_id === item.id && t.id !== row?.id &&
+    item && t.item_id === item.id && t.id !== row?.id && (!outlet || (t.lokasi === outlet && (!t.area || t.area === "dapur"))) &&
     String(t.satuan_so || "").toLowerCase() === String(f.satuan_so || "").toLowerCase() &&
     rowFactor({ isi: t.isi, satuan_so: t.satuan_so, item }) === null
   ), [templates, item, row, f.satuan_so]);
@@ -354,7 +376,7 @@ function TemplateEditor({ bizId, row, lokasi, items, templates, onDone, onCancel
       if (samakan && f.isi !== "" && f.isi !== null) {
         for (const t of saudara) await saveSoTemplate(bizId, { ...t, isi: f.isi });
       }
-      if (kemasanBaru && item) await saveItem(bizId, { ...item, catatan: catatanDenganKemasan(item.catatan, kemasanBaru) });
+      if (kemasanBaru && item && !outlet) await saveItem(bizId, { ...item, catatan: catatanDenganKemasan(item.catatan, kemasanBaru) });
       onDone();
     } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); }
   }
@@ -393,7 +415,7 @@ function TemplateEditor({ bizId, row, lokasi, items, templates, onDone, onCancel
             }} />
         </div>
       )}
-      {item && (
+      {item && !outlet && (
         <FotoKemasan bizId={bizId} onHasil={(h) => {
           if (pakaiKemasan(h.isi, h.satuan)) setKemasanBaru(h);
           else setErr(`Ukuran ${fmtQty(h.isi, 3)} ${h.satuan} tidak cocok dengan satuan hitung "${f.satuan_so || "-"}" / master "${item.satuan}". Isi manual.`);
@@ -414,7 +436,7 @@ function TemplateEditor({ bizId, row, lokasi, items, templates, onDone, onCancel
         <select style={selectInput} value={f.area || ""} onChange={(e) => set("area", e.target.value || null)}>
           <option value="">Semua akun outlet ini</option>
           <option value="dapur">Akun Dapur</option>
-          <option value="bar">Akun Kasir / Bar</option>
+          {!outlet && <option value="bar">Akun Kasir / Bar</option>}
         </select>
       </div>
       <div><span style={label}>Catatan</span><input style={input} value={f.catatan || ""} onChange={(e) => set("catatan", e.target.value)} /></div>
@@ -430,8 +452,8 @@ function TemplateEditor({ bizId, row, lokasi, items, templates, onDone, onCancel
   );
 }
 
-function DaftarSo({ bizId, items, templates, onChanged }) {
-  const [lokasi, setLokasi] = useState("KBU");
+function DaftarSo({ bizId, outlet = null, items, templates, onChanged }) {
+  const [lokasi, setLokasi] = useState(outlet || "KBU");
   const [q, setQ] = useState("");
   const [onlyTodo, setOnlyTodo] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -440,22 +462,26 @@ function DaftarSo({ bizId, items, templates, onChanged }) {
     const words = normSearch(q).split(" ").filter(Boolean);
     return templates
       .filter((t) => t.lokasi === lokasi && byId[t.item_id])
+      .filter((t) => !outlet || !t.area || t.area === "dapur") // akun dapur: baris bar diatur kasir/owner
       .map((t) => ({ ...t, item: byId[t.item_id], factor: rowFactor({ isi: t.isi, satuan_so: t.satuan_so, item: byId[t.item_id] }) }))
       .filter((t) => !onlyTodo || t.factor === null)
       .filter((t) => !words.length || words.every((w) => normSearch(`${t.label} ${t.item.nama} ${t.grup || ""}`).includes(w)))
       .sort((a, b) => (a.urut || 0) - (b.urut || 0));
-  }, [templates, lokasi, byId, q, onlyTodo]);
+  }, [templates, lokasi, byId, q, onlyTodo, outlet]);
   const todo = templates.filter((t) => t.lokasi === lokasi && byId[t.item_id] && rowFactor({ isi: t.isi, satuan_so: t.satuan_so, item: byId[t.item_id] }) === null).length;
 
   if (editing) {
     const nextUrut = Math.max(0, ...templates.filter((t) => t.lokasi === lokasi).map((t) => t.urut || 0)) + 10;
-    return <TemplateEditor bizId={bizId} lokasi={lokasi} items={items} templates={templates} row={editing.id ? editing : { urut: nextUrut }}
+    return <TemplateEditor bizId={bizId} lokasi={lokasi} outlet={outlet} items={items} templates={templates}
+      row={editing.id ? editing : { urut: nextUrut, ...(outlet ? { area: "dapur" } : {}) }}
       onDone={() => { setEditing(null); onChanged?.(); }} onCancel={() => setEditing(null)} />;
   }
 
   return (
     <>
-      <Chips options={LOKASI} value={lokasi} onChange={setLokasi} getLabel={(l) => LOKASI_LABEL[l] || l} />
+      {outlet
+        ? <div style={{ fontWeight: 800 }}>Daftar SO {LOKASI_LABEL[outlet] || outlet} · bagian dapur</div>
+        : <Chips options={LOKASI} value={lokasi} onChange={setLokasi} getLabel={(l) => LOKASI_LABEL[l] || l} />}
       <Notice kind={todo ? "warn" : "info"}>
         Daftar ini = urutan, nama, dan satuan yang dipakai staf saat SO (sama seperti laporan WA).
         {todo ? ` ${todo} baris belum punya konversi ke satuan master — nilainya belum masuk nilai stok.` : " Semua baris sudah punya konversi."}
