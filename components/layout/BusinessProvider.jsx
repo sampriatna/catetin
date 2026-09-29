@@ -16,6 +16,9 @@ import { subscribeAuth, readStoredSession } from "../../lib/authBootstrap";
 import { withTimeout, resetSupabaseSessionCache } from "../../lib/supabaseSession";
 import { resolveAuthMembership } from "../../lib/membershipResolve";
 import * as repo from "../../lib/repo";
+import ActionToast from "../ActionToast";
+import LiveNotif from "../LiveNotif";
+import { isFnBBusiness } from "../../lib/businessFeatures";
 
 const Ctx = createContext(null);
 export const useApp = () => {
@@ -324,7 +327,13 @@ export default function BusinessProvider({ children }) {
     );
   }
 
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider value={value}>
+      {children}
+      <ActionToast />
+      <LiveNotif bizId={bizId} user={authUser} enabled={isFnBBusiness(business)} />
+    </Ctx.Provider>
+  );
 }
 
 function Gate({ msg, children }) {

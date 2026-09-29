@@ -17,7 +17,7 @@
     "import:purchasing": "node scripts/importPurchasingExcel.mjs",
     "scan:item-aliases": "node scripts/scanItemAliases.mjs",
     "start": "next start",
-    "test:inventory": "node --test lib/inventoryLogic.test.mjs lib/dapurAccess.test.mjs lib/rbacWallets.test.mjs lib/membershipResolve.test.mjs"
+    "test:inventory": "node --test lib/inventoryLogic.test.mjs lib/dapurAccess.test.mjs lib/rbacWallets.test.mjs lib/membershipResolve.test.mjs lib/liveNotif.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.105.0",

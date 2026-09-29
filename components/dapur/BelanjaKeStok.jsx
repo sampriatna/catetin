@@ -3,6 +3,7 @@
 // (diatur sekali, lalu otomatis). Barang yang belum dikenali ditandai supaya purchasing memasangkannya.
 // Tanpa AI: pencocokan pakai aturan + padanan tersimpan (inv_purchase_map).
 
+import { showActionToast, toastGagal } from "../../lib/actionToast";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   LOKASI_LABEL, cocokkanBelanja, belanjaKey, lokasiBelanja, ringkasBelanja, parseQty, fmtQty, fmtRp, todayJakarta,
@@ -39,7 +40,7 @@ export default function BelanjaKeStok({ bizId, user, access, items, onSaved }) {
     return (
       <Editor bizId={bizId} user={user} access={access} items={items} maps={maps} t={open}
         onCancel={() => setOpen(null)}
-        onDone={(msg) => { setOpen(null); setDone(msg); reload(); onSaved?.(); }} />
+        onDone={(msg) => { showActionToast(msg, "success"); setOpen(null); setDone(msg); reload(); onSaved?.(); }} />
     );
   }
 
@@ -150,7 +151,7 @@ function Editor({ bizId, user, access, items, maps, t, onCancel, onDone }) {
         ? `${stok.length} barang masuk ke stok ${LOKASI_LABEL[lokasi] || lokasi}${stok.some(({ r, c }) => r.modal && c.harga > 0) ? " · modal diperbarui" : ""}.`
         : "Belanja ditandai bukan barang stok.");
     } catch (e) {
-      setErr(e.message || String(e));
+      setErr(toastGagal(e, "Gagal masukkan ke stok"));
     } finally {
       setBusy(false);
     }

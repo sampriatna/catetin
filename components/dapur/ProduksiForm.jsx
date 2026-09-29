@@ -1,6 +1,7 @@
 "use client";
 // Produksi: bahan baku → barang setengah jadi. Modal per satuan hasil dihitung otomatis.
 
+import { showActionToast, toastGagal } from "../../lib/actionToast";
 import { useMemo, useRef, useState } from "react";
 import { Trash2 } from "lucide-react";
 import {
@@ -71,12 +72,13 @@ export default function ProduksiForm({ bizId, user, lokasi, items, recipes, snap
         stokHasil: lastSo && (lastSo.satuan || hasilItem.satuan) === hasilItem.satuan ? round2(Number(lastSo.qty) + hq) : null,
         catatan,
       });
+      showActionToast(`Produksi ${hasilItem.nama} tercatat.`, "success");
       setDone({ text, perUnit, duplicate: !!res?.duplicate, nama: hasilItem.nama, satuan: hasilItem.satuan });
       setRecipeId(""); setHasilItem(null); setHasilQty(""); setBahan([]); setCatatan(""); setBatch("1");
       refId.current = makeClientRef("prod");
       onSaved?.();
     } catch (e) {
-      setErr(e.message || String(e));
+      setErr(toastGagal(e, "Produksi gagal disimpan"));
     } finally {
       setBusy(false);
     }
