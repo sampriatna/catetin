@@ -60,7 +60,7 @@ async function fetchTransactions(admin, businessId, assistantRole, outlet) {
   const since = cutoff.toISOString().slice(0, 10);
 
   // Transaksi disimpan per baris di app_transactions (bukan lagi di app_state.data.transactions).
-  // Ambil hanya kolom yang dipakai, per 1000 baris.
+  // Ambil hanya kolom yang dipakai, per 1000 baris, urut tanggal (pakai indeks app_transactions_biz_date_idx).
   const PAGE = 1000;
   let txs = [];
   for (let from = 0; from < 50000; from += PAGE) {
@@ -69,6 +69,7 @@ async function fetchTransactions(admin, businessId, assistantRole, outlet) {
       .select("date:data->>date, type:data->>type, amount:data->amount, outlet:data->>outlet, supplier:data->>supplier, desc:data->>desc, module:data->>module")
       .eq("business_id", businessId)
       .gte("data->>date", since)
+      .order("data->>date", { ascending: false })
       .order("tx_id")
       .range(from, from + PAGE - 1);
     if (error) {
