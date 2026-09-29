@@ -5,6 +5,7 @@ import { Home, BarChart3, Sparkles, User, Mic, Bell, Inbox, Cloud, Eye, EyeOff, 
 import KategoriPurchasing from "../../../components/KategoriPurchasing";
 const StockValueCard = dynamic(() => import("../../../components/dapur/StockValueCard"), { ssr: false });
 import useDapurToday from "../../../components/dapur/useDapurToday";
+import useStokMenipis from "../../../components/dapur/useStokMenipis";
 import { fmtJam } from "../../../lib/inventoryLogic";
 import LaporanPurchasing from "../../../components/LaporanPurchasing";
 import AsistenPurchasing from "../../../components/AsistenPurchasing";
@@ -1253,6 +1254,8 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
     area: user.role === "kasir" ? "bar" : null,
     enabled: !!features?.isFnB && !!dapurLokasi,
   });
+  // Purchasing: bahan habis / menipis di semua lokasi (dasar belanja & kirim stok).
+  const stokMenipisList = useStokMenipis({ bizId, enabled: !!features?.isFnB && user.role === "purchasing" });
   const purchasingArea = user.role === "purchasing" && user.outlet && !["KBU", "KSM", "SMT"].includes(user.outlet)
     ? String(user.outlet)
     : "";
@@ -1960,6 +1963,20 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
               done: todayOutTx.length > 0,
               onClick: () => onCatat?.(),
             },
+            ...(features.isFnB && stokMenipisList?.length ? [(() => {
+              const habis = stokMenipisList.filter((r) => r.status === "habis").length;
+              const contoh = stokMenipisList.slice(0, 3).map((r) => `${r.item.nama} (${r.lokasi})`).join(", ");
+              return {
+                id: "stokhabis",
+                title: `Stok Habis / Menipis (${stokMenipisList.length})`,
+                subtitle: `${habis ? `${habis} habis · ` : ""}${contoh}${stokMenipisList.length > 3 ? ", …" : ""}`,
+                done: false,
+                optional: !habis,
+                urgent: habis > 0,
+                actionLabel: "Lihat daftar",
+                onClick: () => { window.location.href = "/dapur?tab=hari"; },
+              };
+            })()] : []),
             ...(features.isFnB ? [{
               id: "dapur",
               title: "SO Gudang",

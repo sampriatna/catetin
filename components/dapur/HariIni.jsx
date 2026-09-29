@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, ChevronRight, Circle, AlertTriangle } from "lucide-react";
 import {
-  LOKASI, LOKASI_LABEL, PRIORITY, PRIORITY_LABEL, summarizeDapurToday, soAreaStatus, stockStatus, todayJakarta, fmtJam, fmtRp, fmtQty,
+  LOKASI, LOKASI_LABEL, PRIORITY, PRIORITY_LABEL, summarizeDapurToday, soAreaStatus, stokMenipis, todayJakarta, fmtJam, fmtRp, fmtQty,
 } from "../../lib/inventoryLogic";
 import { loadDapurToday } from "../../lib/inventoryRepo";
 import { C, card, Notice } from "./ui";
@@ -63,15 +63,9 @@ export default function HariIni({ bizId, user, access, lokasi, items, snapshot, 
   const st = useMemo(() => (data ? summarizeDapurToday({ ...data, lokasi: scopeLokasi, userId: user?.id, today }) : null), [data, scopeLokasi, user?.id, today]);
   const masukHariIni = useMemo(() => (data?.events || []).filter((e) => e.jenis === "masuk"), [data]);
 
-  const itemsById = useMemo(() => Object.fromEntries((items || []).map((i) => [i.id, i])), [items]);
-  const alertLokasi = acc.lihatLokasi.filter((l) => !scopeLokasi || l === scopeLokasi);
-  const menipis = useMemo(() => (snapshot || [])
-    .filter((r) => alertLokasi.includes(r.lokasi))
-    .map((r) => ({ ...r, item: itemsById[r.item_id] }))
-    .filter((r) => r.item && (r.satuan || r.item.satuan) === r.item.satuan)
-    .map((r) => ({ ...r, status: stockStatus(r.qty, r.item.min_stok) }))
-    .filter((r) => r.status === "habis" || r.status === "menipis")
-    .slice(0, 12), [snapshot, itemsById, alertLokasi]);
+  // Outlet: stok outletnya. Purchasing / gudang / owner: semua lokasi (belanja & kirim untuk outlet juga).
+  const alertLokasi = acc.isOutlet ? [acc.outlet] : acc.lihatLokasi;
+  const menipis = useMemo(() => stokMenipis(snapshot, items, alertLokasi).slice(0, 20), [snapshot, items, alertLokasi]);
 
   if (err) return <Notice kind="bad">Status hari ini belum bisa dimuat: {err}</Notice>;
   if (!st) return <div style={{ padding: 30, textAlign: "center", color: C.sub }}>Memuat…</div>;
@@ -168,7 +162,7 @@ export default function HariIni({ bizId, user, access, lokasi, items, snapshot, 
           <div style={{ fontWeight: 800, fontSize: 14 }}>{doesBelanja && !doesGudang ? "Kebutuhan: di bawah stok minimum" : "Menipis / habis (SO terakhir)"}</div>
           {menipis.map((r) => (
             <div key={`${r.lokasi}-${r.item_id}`} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13 }}>
-              <span>{r.status === "habis" ? "🔴" : "🟠"} {r.item.nama}{scopeLokasi ? "" : ` · ${r.lokasi}`}</span>
+              <span>{r.status === "habis" ? "🔴" : "🟠"} {r.item.nama}{acc.isOutlet ? "" : ` · ${r.lokasi}`}</span>
               <span style={{ color: C.sub }}>{fmtQty(r.qty)} / min {fmtQty(r.item.min_stok)} {r.item.satuan}</span>
             </div>
           ))}
