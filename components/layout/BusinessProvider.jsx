@@ -18,6 +18,7 @@ import { resolveAuthMembership } from "../../lib/membershipResolve";
 import * as repo from "../../lib/repo";
 import ActionToast from "../ActionToast";
 import LiveNotif from "../LiveNotif";
+import PushOptIn from "../PushOptIn";
 import { isFnBBusiness } from "../../lib/businessFeatures";
 
 const Ctx = createContext(null);
@@ -332,6 +333,7 @@ export default function BusinessProvider({ children }) {
       {children}
       <ActionToast />
       <LiveNotif bizId={bizId} user={authUser} enabled={isFnBBusiness(business)} />
+      <PushOptIn bizId={bizId} enabled={isFnBBusiness(business)} />
     </Ctx.Provider>
   );
 }

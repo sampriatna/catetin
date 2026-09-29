@@ -1,5 +1,21 @@
 /* NF3 service worker — bump APP_SW_VERSION / SW_VERSION tiap patch kritis */
-const SW_VERSION = "nf3-sw-20260929-notif";
+const SW_VERSION = "nf3-sw-20260929-push";
+
+// Notifikasi dari server saat HP terkunci / aplikasi tertutup (Web Push).
+self.addEventListener("push", (event) => {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch { d = { title: "NF3", body: event.data ? event.data.text() : "" }; }
+  const title = d.title || "NF3";
+  event.waitUntil(self.registration.showNotification(title, {
+    body: d.body || "",
+    tag: d.tag || undefined,
+    renotify: !!d.tag,
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    vibrate: [120, 60, 120],
+    data: { href: d.href || "/dashboard" },
+  }));
+});
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
