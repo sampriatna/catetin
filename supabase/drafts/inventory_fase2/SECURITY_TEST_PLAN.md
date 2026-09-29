@@ -1,110 +1,114 @@
-# SECURITY_TEST_PLAN — Inventory draft (review-only)
+# SECURITY_TEST_PLAN — Inventory draft (putaran 3)
 
-**Jangan jalankan di produksi tanpa sandbox terisolasi.**  
-Rencana ini untuk UAT/review setelah migration disetujui & diterapkan di environment uji.
+**Jangan jalankan di produksi.** Sandbox terisolasi saja.
 
-## Setup sandbox
+## Kasus putaran 2 (tetap wajib)
 
-1. Dua bisnis: A (F&B) dan B (dummy).
-2. User: Owner A, Admin A, Purchasing A, Kasir KBU A, Dapur KBU A, Bar KBU A, Forecasting A, Receiver KBU A (`receive_stock`), User bisnis B.
-3. Seed lokasi A via **RPC owner-only / service role** memanggil `ensure_fnb_inventory_locations` (fungsi tidak di-grant ke authenticated).
-4. Jangan gunakan data produksi.
+1. Isolasi lintas bisnis  
+2. Outlet tidak baca cost (balances/lots/movements/transfer_lines/waste/opname_lines)  
+3. Receiver tidak ubah `sent_qty`  
+4. Forecasting assignment tidak receive outlet  
+5. Authenticated tidak panggil fungsi internal (`_apply_*`, `_post_*`, `upsert_*`, `ensure_*`, `_location_*`)  
+6. Client tidak set `posted`  
+7. Stok/lot negatif setelah go-live  
+8. Multi-role invite tidak turunkan legacy  
+9. Missing location → invite gagal  
+10. `app_tx_id` non-UUID (`imp_*`)  
+11. PR/PO CHECK + Admin bukan create link  
+12. Opname threshold OR + self-approve dilarang  
+13. Transfer satu kaki + partial receipt  
+14. Rollback stop-before-DROP  
+15. Kasir tanpa `receive_stock` otomatis  
 
-## Kasus wajib
+## Kasus baru putaran 3 (wajib)
 
-### 1) Isolasi lintas bisnis
-- User A mencoba SELECT/INSERT item/lokasi bisnis B → **deny**.
-- Composite FK: assignment location bisnis B ke member A → **gagal**.
-- Movement item A + location B → **gagal**.
+### A) Compensating adjustment
+- Compensating membuat row baru + `stock_movement_compensations`  
+- Original posted **tidak** di-UPDATE  
+- Satu original hanya satu kompensasi (`unique original_movement_id`)  
+- Boleh dikompensasi meski ada movement lanjutan (compensating path)  
+- `from_location_id <> to_location_id` ditegakkan  
 
-### 2) Outlet tidak bisa baca cost
-Sebagai Dapur/Bar/Kasir/Receiver (bukan valuer):
+### B) cost_pending tidak rollback
+- `finalize` dengan line tanpa cost → exception **tanpa** mengubah status di transaksi gagal  
+- `mark_inventory_receipt_cost_pending` menyimpan status secara terpisah  
+- `save_inventory_receipt_lines` set `cost_pending` / `ready_to_post` tanpa exception  
 
-| Target | Harapan |
-|---|---|
-| `select * from stock_balances` | 0 row / deny |
-| `select * from inventory_lots` | deny (ada `initial_unit_cost`) |
-| `select * from stock_movements` | deny |
-| `select * from stock_transfer_lines` | deny |
-| `select * from waste_records` | deny |
-| `select difference_value from stock_opname_lines` | deny |
-| `list_inventory_quantities(biz)` | OK, tanpa cost |
-| `list_transfer_lines_qty(transfer)` | OK, tanpa `unit_cost` |
-| `list_inventory_valuation(biz)` | **forbidden** |
+### C) Finalize receipt gate
+- Tanpa line → gagal  
+- Tanpa `purchasing_tx_link_id` → gagal  
+- Direct/emergency belum approved → gagal  
+- PR belum approved → gagal  
+- PO tanpa PR / PR beda → gagal  
+- Link `received=true` → gagal  
+- Sukses → receipt+link locked/received dalam satu transaksi  
 
-### 3) Receiver tidak ubah sent_qty
-- `update stock_transfer_lines set sent_qty = …` langsung → gagal (guard / no policy).
-- `receive_stock_transfer` hanya menerima `received_qty`, `variance_reason`, `photo`.
-- Mencoba ubah `item_id` / `lot_id` / `unit_cost` via client → gagal.
+### D) Purchasing self-approve
+- Tidak ada UPDATE policy langsung pada `purchasing_tx_links`  
+- Purchasing panggil `review_purchasing_tx_link` → deny  
+- Admin/Owner review OK; Admin tidak bisa ubah PR/PO via review RPC  
+- Approved/locked membekukan seluruh field penting  
 
-### 4) Forecasting tidak receive atas nama outlet
-- User forecasting panggil `receive_stock_transfer` → **exception**.
-- User forecasting panggil `send_stock_transfer` → OK (punya `create_transfer`).
+### E) Stale opname
+- Submit → buat receive/transfer di lokasi yang sama → `approve_stock_opname` /
+  `post_stock_opname_if_no_approval` → **return row** dengan `status = recount_required`
+  (bukan exception; status harus committed/terlihat setelah RPC sukses)  
+- Positive adj tanpa avg cost tanpa `unit_cost_override` → gagal  
+- Positive adj dengan override → wajib Owner approval  
+- `physical_qty < 0` → gagal  
+- Submit tanpa line → gagal  
+- Ubah line setelah submitted tanpa RPC flag → gagal  
 
-### 5) Authenticated tidak panggil fungsi internal
-Harus gagal permission untuk:
+### F) Opening + go-live
+- `post_inventory_opening` dua kali pada session yang sama → reject  
+- Lokasi sudah locked → reject opening ulang  
+- `activate_inventory_go_live` gagal jika ada lokasi aktif belum locked  
+- Gagal jika ada receipt/transfer/opname menggantung  
+- Direct UPDATE `inventory_business_state` oleh authenticated → deny (no write policy)  
+- Setelah go-live, opening baru ditolak  
 
-- `_apply_balance_delta`
-- `_apply_lot_balance_delta`
-- `_post_stock_movement_internal`
-- `upsert_member_assignment`
-- `ensure_fnb_inventory_locations`
-- `_location_id_for_outlet`
-- `_create_compensating_adjustment`
-- `_require_assignment`
+### G) Transfer variance
+- Payload kosong / `received_qty=0` / duplicate line → reject  
+- `resolve_transfer_variance` membuat movement nyata untuk
+  `returned_to_source` / `damaged` / `shrinkage` / `adjustment_approved`  
+- `resolution = received_later` → **reject** (penerimaan lanjutan hanya
+  `receive_stock_transfer` + assignment `receive_stock` di outlet)  
+- Forecasting/owner **tidak** bisa transfer_in ke outlet lewat variance  
+- Sisa IN_TRANSIT berkurang sesuai resolusi (bukan lewat received_later)  
 
-### 6) Draft tidak jadi posted dari client
-- `insert into stock_movements (..., status='posted')` → gagal trigger.
-- `update stock_movements set status='posted'` tanpa `inventory.posting` → gagal.
-- Tanpa policy write: insert draft langsung oleh authenticated → deny.
+### H) Assignment audit
+- Owner kirim `assignment_id` milik user lain → exception  
+- Owner tanpa assignment → `assignment_id` null di movement  
+- Non-owner wajib assignment milik sendiri  
 
-### 7) Stok negatif
-- Setelah `lifecycle=go_live`, outbound melebihi qty → exception.
-- Lot quantity negatif → exception.
-- Outbound tanpa `average_cost` sumber → exception.
+### I) Settings / role-location / unit
+- Settings negatif / urutan expiry terbalik → CHECK gagal  
+- Assignment dapur tanpa location → CHECK/RPC gagal  
+- Forecasting dengan location → gagal  
+- `stock_unit` text tidak bisa menyimpang dari `units.code` (sync trigger)  
 
-### 8) Multi-role invite tidak turunkan legacy
-- User kasir KBU terima invite dapur KBU → `business_members.role` tetap `kasir`; assignment dapur bertambah.
-- User owner terima invite forecasting → role tetap `owner`, bukan `member`.
-- User member-only (forecasting) → `business_members.role=member`.
+### J) Composite FK SET NULL
+- Hapus assignment yang direferensikan histori → RESTRICT (gagal), bukan null-kan `business_id`  
 
-### 9) Missing location → invite gagal
-- Invite dapur outlet `XYZ` tanpa lokasi → `accept_invite_v2` exception.
-- Tidak boleh jadi assignment business-wide.
+### K) Lot/expiry required
+- Line transfer/receipt/opname/production dengan lot beda item → gagal di trigger  
+- Item `expiry_mode=required` tanpa expiry pada receipt/opening/production output → gagal  
 
-### 10) app_tx_id non-UUID
-- Link `app_tx_id = 'imp_abc123'` + `source_system='app_state'` → sukses.
-- Orphan validator bandingkan text equality.
+### L) Invite email + cutover gate
+- Token invite email A dipakai akun email B → gagal (v2)  
+- Invite tanpa email (token-based) tetap bisa (v2)  
+- **Cutover:** role inventory belum di UI legacy → staging `01 → 02 → 08`
+  (RPC legacy utuh) → smoke legacy admin/kasir/purchasing → deploy app v2
+  (feature flag) → smoke legacy via v2 → smoke inventory via v2 → enable
+  role inventory → production controlled cutover (`INVITE_CUTOVER.md`)  
+- Setelah apply SQL, smoke legacy gagal → **STOP + rollback**; jangan deploy app v2  
+- Draft `08` **tidak** replace RPC legacy; keduanya tetap berdampingan
+  sampai Owner deprecate terpisah  
 
-### 11) PR/PO link rules
-- `from_pr` dengan `purchase_order_id` set → CHECK gagal.
-- `from_po` tanpa PR → gagal.
-- `direct` tanpa reason → gagal; `review_status` awal `pending_review`.
-- PR line asing → trigger gagal.
-- Admin insert link baru → deny (hanya purchasing/owner create).
-- `locked=true` lalu `locked=false` → gagal.
-- Approved link delete → gagal.
+### M) Rollback ketat
+- Ada 1 row di `suppliers` / draft transfer / draft movement → rollback berhenti sebelum DROP  
+- Assignment nonaktif + draft data tetap memblokir rollback  
 
-### 12) Opname
-- Client kirim `requires_approval=false` palsu → server hitung ulang di `submit_stock_opname`.
-- Selisih 8% / Rp20rb → approval; 2% / Rp300rb → approval; 2% / Rp20rb → tidak.
-- Forecasting approve opname sendiri → gagal.
-- Warehouse opname forecasting → wajib Owner.
-- Edit/hapus submitted langsung → gagal.
-
-### 13) Transfer satu kaki + partial receipt
-- Send: 1 movement/item `from→IN_TRANSIT` `transfer_out`.
-- Receive 9 dari 10: receipt lines histori; sisa 1 tetap di IN_TRANSIT.
-- Receive kedua mencatat receipt terpisah.
-
-### 14) Rollback aman
-- Dengan posted movement / active assignment / role member: jalankan `99_ROLLBACK_ALL` → **berhenti di preflight**, tidak DROP.
-- Sandbox kosong: rollback menyelesaikan DROP + CHECK legacy; **tidak** menyisakan stub `can_access_location`.
-
-### 15) Kasir tanpa receive_stock otomatis
-- Invite kasir → permissions tidak mengandung `receive_stock`.
-- `receive_stock_transfer` sebagai kasir tanpa grant eksplisit → gagal.
-
-## Bukti yang dikumpulkan
-
-Untuk tiap kasus: user, SQL/RPC, hasil (deny/allow), timestamp. Simpan di catatan UAT sebelum approve migration produksi.
+### N) Draft write path
+- Authenticated INSERT langsung ke `stock_transfers` / `inventory_receipts` / `stock_opnames` → deny (no policy)  
+- Harus lewat `create_*_draft` RPC  
