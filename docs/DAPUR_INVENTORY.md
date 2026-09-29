@@ -45,7 +45,7 @@ Sumber kebenaran = SO fisik. Penjualan belum dipakai (mode pemantauan harian).
   - angka selalu bulat/estimasi (info),
   - waste ≥ Rp50.000 per barang dalam 7 hari (tinggi).
 
-Belanja yang dimasukkan lewat **Belanja → Stok** menyimpan harga beli aktual pada baris barang masuk. Bila purchasing memilih “Perbarui modal”, harga master diperbarui dalam transaksi database yang sama (bukan request terpisah per barang). Pembelian bertanggal lebih lama tetap tersimpan dengan harga notanya, tetapi tidak menimpa modal master yang sudah lebih baru. Harga yang berubah ≥5× memunculkan konfirmasi konversi kemasan sebelum disimpan.
+Belanja yang dimasukkan lewat **Belanja → Stok** menyimpan harga beli aktual pada baris barang masuk. HPP master dihitung otomatis sebagai **rata-rata tertimbang maksimal 5 pembelian terakhir** berdasarkan kuantitas dan harga aktual; staf tidak perlu memilih atau menghitung sendiri. Proses berjalan dalam transaksi database yang sama. Harga yang berubah ≥5× tetap memunculkan konfirmasi konversi kemasan sebelum disimpan.
 - Prioritas dari nilai Rp: Info < Rp25rb ≤ Pantau < Rp100rb ≤ Peringatan < Rp500rb ≤ Kritis; berulang ≥3× naik satu tingkat.
 - Owner/admin: kartu **Insight stok** di Hari Ini dan tab **Audit** (filter lokasi & prioritas, rincian buku pergerakan per barang).
 
