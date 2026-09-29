@@ -1,16 +1,70 @@
 "use client";
 // Kelola master bahan, resep produksi, daftar SO, dan cek lokasi barang (owner/admin, purchasing, gudang).
 
-import { useMemo, useState } from "react";
-import { Trash2 } from "lucide-react";
-import { LOKASI, LOKASI_LABEL, TIPE_LABEL, searchItems, normSearch, rowFactor, fmtRp, fmtQty } from "../../lib/inventoryLogic";
-import { saveItem, saveRecipe, saveSoTemplate } from "../../lib/inventoryRepo";
+import { useMemo, useRef, useState } from "react";
+import { Camera, Trash2 } from "lucide-react";
+import { LOKASI, LOKASI_LABEL, TIPE_LABEL, searchItems, normSearch, rowFactor, fmtRp, fmtQty, isiDariKemasan } from "../../lib/inventoryLogic";
+import { bacaKemasan, saveItem, saveRecipe, saveSoTemplate } from "../../lib/inventoryRepo";
 import { C, card, input, label, Btn, Chips, Notice, SearchBox, ItemPicker, QtyInput, selectInput } from "./ui";
 
 const MODES = ["Bahan", "Resep", "Daftar SO", "Cek Lokasi"];
 const OUTLETS = ["KBU", "KSM", "SMT"];
 
 const EMPTY_ITEM = { kode: "", nama: "", kategori: "", tipe: "bahan", satuan: "pcs", harga: "", lokasi: [], min_stok: "", aktif: true, catatan: "" };
+
+// ── Foto kemasan → ukuran isi otomatis (AI murah di server; hasil tetap bisa diubah) ──
+
+const KEMASAN_RE = /Kemasan:\s*([\d.,]+)\s*(ml|gr)\b/i;
+
+/** Ukuran kemasan yang pernah dicatat di catatan bahan ("Kemasan: 760 ml"). */
+function kemasanDariCatatan(catatan) {
+  const m = KEMASAN_RE.exec(String(catatan || ""));
+  if (!m) return null;
+  const isi = Number(m[1].replace(",", "."));
+  return isi > 0 ? { isi, satuan: m[2].toLowerCase() } : null;
+}
+
+function catatanDenganKemasan(catatan, hasil) {
+  const teks = `Kemasan: ${fmtQty(hasil.isi, 3)} ${hasil.satuan}${hasil.merek ? ` (${hasil.merek})` : ""}`;
+  const lama = String(catatan || "").replace(/Kemasan:[^;]*;?\s*/i, "").trim();
+  return lama ? `${teks}; ${lama}` : teks;
+}
+
+function FotoKemasan({ bizId, onHasil }) {
+  const ref = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [info, setInfo] = useState(null);
+  async function pilih(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setBusy(true); setInfo(null);
+    try {
+      const h = await bacaKemasan(bizId, file);
+      if (h.isi) {
+        onHasil(h);
+        setInfo({ kind: h.yakin === "rendah" ? "warn" : "ok", text: `Terbaca ${[h.merek, h.nama_produk].filter(Boolean).join(" ") || "kemasan"}: ${fmtQty(h.isi, 3)} ${h.satuan}${h.yakin === "rendah" ? " — kurang yakin, cek labelnya." : ". Cek lagi sebelum simpan."}` });
+      } else {
+        setInfo({ kind: "warn", text: `Ukuran tidak terbaca${h.catatan ? `: ${h.catatan}` : ""}. Foto lebih dekat ke tulisan netto/isi, atau isi manual.` });
+      }
+    } catch (err) {
+      setInfo({ kind: "bad", text: err.message || String(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div style={{ display: "grid", gap: 6 }}>
+      <input ref={ref} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={pilih} />
+      <Btn kind="ghost" onClick={() => ref.current?.click()} disabled={busy}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <Camera size={18} /> {busy ? "Membaca foto…" : "Foto kemasan (isi ukuran otomatis)"}
+        </span>
+      </Btn>
+      {info && <Notice kind={info.kind}>{info.text}</Notice>}
+    </div>
+  );
+}
 
 function ItemEditor({ bizId, item, onDone, onCancel }) {
   const [f, setF] = useState({ ...EMPTY_ITEM, ...item, harga: item?.harga ?? "", min_stok: item?.min_stok ?? "" });
@@ -58,7 +112,20 @@ function ItemEditor({ bizId, item, onDone, onCancel }) {
           ))}
         </div>
       </div>
-      <div><span style={label}>Catatan</span><input style={input} value={f.catatan || ""} onChange={(e) => set("catatan", e.target.value)} /></div>
+      <FotoKemasan bizId={bizId} onHasil={(h) => {
+        setF((x) => ({
+          ...x,
+          nama: x.nama || [h.nama_produk, h.merek].filter(Boolean).join(" "),
+          catatan: catatanDenganKemasan(x.catatan, h),
+        }));
+      }} />
+      <div>
+        <span style={label}>Catatan</span>
+        <input style={input} value={f.catatan || ""} onChange={(e) => set("catatan", e.target.value)} placeholder="mis. Kemasan: 760 ml (Marjan)" />
+      </div>
+      <div style={{ fontSize: 12, color: C.sub }}>
+        Ukuran kemasan di catatan dipakai otomatis saat bahan ini ditambahkan ke daftar SO (mis. sirup dihitung ml, stok per botol).
+      </div>
       <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
         <input type="checkbox" checked={f.aktif !== false} onChange={(e) => set("aktif", e.target.checked)} /> Aktif
       </label>
@@ -216,7 +283,7 @@ export default function KelolaBahan({ bizId, items, recipes, templates, onChange
 
 // ── Daftar SO per outlet: nama & satuan staf + konversi ke satuan master ──
 
-function TemplateEditor({ bizId, row, lokasi, items, onDone, onCancel }) {
+function TemplateEditor({ bizId, row, lokasi, items, templates, onDone, onCancel }) {
   const byId = useMemo(() => Object.fromEntries(items.map((i) => [i.id, i])), [items]);
   const [f, setF] = useState({
     lokasi, label: "", grup: "", urut: "", satuan_so: "", isi: "", catatan: "", aktif: true,
@@ -229,10 +296,45 @@ function TemplateEditor({ bizId, row, lokasi, items, onDone, onCancel }) {
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [kemasanBaru, setKemasanBaru] = useState(null); // hasil foto → dicatat juga di master bahan
+  const [samakan, setSamakan] = useState(true);
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+
+  // Baris outlet lain untuk bahan & satuan hitung yang sama yang belum punya konversi.
+  const saudara = useMemo(() => (templates || []).filter((t) =>
+    item && t.item_id === item.id && t.id !== row?.id &&
+    String(t.satuan_so || "").toLowerCase() === String(f.satuan_so || "").toLowerCase() &&
+    rowFactor({ isi: t.isi, satuan_so: t.satuan_so, item }) === null
+  ), [templates, item, row, f.satuan_so]);
+
+  /** Ukuran kemasan (mis. 760 ml) → isi konversi baris ini. */
+  function pakaiKemasan(ukuran, satuan, itm = item, satuanSo = f.satuan_so) {
+    if (!itm) return false;
+    let so = satuanSo;
+    if (!so && !["ml", "gr"].includes(String(itm.satuan).toLowerCase())) so = satuan; // sirup master btl → staf hitung ml
+    const isi = isiDariKemasan(ukuran, satuan, so, itm.satuan);
+    if (isi === null) return false;
+    setF((x) => ({ ...x, satuan_so: so, isi: String(isi) }));
+    setBalik(isi < 1 ? String(ukuran) : "");
+    return true;
+  }
+
+  function pilihItem(itm) {
+    setItem(itm);
+    const k = kemasanDariCatatan(itm?.catatan);
+    if (k && (f.isi === "" || f.isi === null)) pakaiKemasan(k.isi, k.satuan, itm);
+  }
+
   async function save() {
     setBusy(true); setErr("");
-    try { await saveSoTemplate(bizId, { ...f, item_id: item?.id }); onDone(); } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); }
+    try {
+      await saveSoTemplate(bizId, { ...f, item_id: item?.id });
+      if (samakan && f.isi !== "" && f.isi !== null) {
+        for (const t of saudara) await saveSoTemplate(bizId, { ...t, isi: f.isi });
+      }
+      if (kemasanBaru && item) await saveItem(bizId, { ...item, catatan: catatanDenganKemasan(item.catatan, kemasanBaru) });
+      onDone();
+    } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); }
   }
   return (
     <div style={{ ...card, display: "grid", gap: 10 }}>
@@ -245,7 +347,7 @@ function TemplateEditor({ bizId, row, lokasi, items, onDone, onCancel }) {
             <div style={{ fontSize: 14 }}><b>{item.nama}</b> <span style={{ color: C.sub }}>({item.kode} · {item.satuan} · {fmtRp(item.harga)}/{item.satuan})</span></div>
             <button type="button" onClick={() => setItem(null)} style={{ border: "none", background: "transparent", color: C.brand, fontWeight: 700, cursor: "pointer" }}>Ganti</button>
           </div>
-        ) : <ItemPicker items={items.filter((i) => i.aktif !== false)} onPick={setItem} />}
+        ) : <ItemPicker items={items.filter((i) => i.aktif !== false)} onPick={pilihItem} />}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <div><span style={label}>Grup</span><input style={input} value={f.grup || ""} onChange={(e) => set("grup", e.target.value)} placeholder="Dapur / Bar / Topping" /></div>
@@ -268,6 +370,18 @@ function TemplateEditor({ bizId, row, lokasi, items, onDone, onCancel }) {
               set("isi", n > 0 ? String(Math.round((1 / n) * 1e6) / 1e6) : "");
             }} />
         </div>
+      )}
+      {item && (
+        <FotoKemasan bizId={bizId} onHasil={(h) => {
+          if (pakaiKemasan(h.isi, h.satuan)) setKemasanBaru(h);
+          else setErr(`Ukuran ${fmtQty(h.isi, 3)} ${h.satuan} tidak cocok dengan satuan hitung "${f.satuan_so || "-"}" / master "${item.satuan}". Isi manual.`);
+        }} />
+      )}
+      {item && saudara.length > 0 && (
+        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+          <input type="checkbox" checked={samakan} onChange={(e) => setSamakan(e.target.checked)} />
+          Pakai konversi ini juga di {saudara.map((t) => t.lokasi).filter((v, i, a) => a.indexOf(v) === i).join(", ")} (belum diatur)
+        </label>
       )}
       <div style={{ fontSize: 12, color: C.sub }}>
         Contoh: Beras dihitung per <b>karung</b>, master dalam <b>kg</b> → isi 25. Sirup dihitung <b>ml</b>, master <b>btl</b> → isi = 1/volume botol (botol 750 ml → 0,001333).
@@ -313,7 +427,7 @@ function DaftarSo({ bizId, items, templates, onChanged }) {
 
   if (editing) {
     const nextUrut = Math.max(0, ...templates.filter((t) => t.lokasi === lokasi).map((t) => t.urut || 0)) + 10;
-    return <TemplateEditor bizId={bizId} lokasi={lokasi} items={items} row={editing.id ? editing : { urut: nextUrut }}
+    return <TemplateEditor bizId={bizId} lokasi={lokasi} items={items} templates={templates} row={editing.id ? editing : { urut: nextUrut }}
       onDone={() => { setEditing(null); onChanged?.(); }} onCancel={() => setEditing(null)} />;
   }
 
