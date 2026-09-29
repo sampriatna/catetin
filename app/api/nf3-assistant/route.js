@@ -55,18 +55,29 @@ function assistantOutlet(member) {
 
 async function fetchTransactions(admin, businessId, assistantRole, outlet) {
   const lookback = lookbackDaysForRole(assistantRole);
-  const { data, error } = await admin
-    .from("app_state")
-    .select("data")
-    .eq("business_id", businessId)
-    .maybeSingle();
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - lookback);
+  const since = cutoff.toISOString().slice(0, 10);
 
-  if (error) {
-    console.error("NF3 Assistant app_state error:", error.message);
-    return { txs: [], dataLoadError: true };
+  // Transaksi disimpan per baris di app_transactions (bukan lagi di app_state.data.transactions).
+  // Ambil hanya kolom yang dipakai, per 1000 baris.
+  const PAGE = 1000;
+  let txs = [];
+  for (let from = 0; from < 50000; from += PAGE) {
+    const { data, error } = await admin
+      .from("app_transactions")
+      .select("date:data->>date, type:data->>type, amount:data->amount, outlet:data->>outlet, supplier:data->>supplier, desc:data->>desc, module:data->>module")
+      .eq("business_id", businessId)
+      .gte("data->>date", since)
+      .order("tx_id")
+      .range(from, from + PAGE - 1);
+    if (error) {
+      console.error("NF3 Assistant app_transactions error:", error.message);
+      return { txs: [], dataLoadError: true };
+    }
+    txs = txs.concat((data || []).map((t) => ({ ...t, amount: Number(t.amount) || 0 })));
+    if (!data || data.length < PAGE) break;
   }
-
-  let txs = data?.data?.transactions || [];
 
   if (assistantRole === "kasir" && outlet && outlet !== "semua") {
     txs = txs.filter((t) => (t.outlet || "").toUpperCase() === outlet.toUpperCase());
@@ -74,8 +85,6 @@ async function fetchTransactions(admin, businessId, assistantRole, outlet) {
     txs = txs.filter((t) => t.module === "purchasing");
   }
 
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - lookback);
   txs = txs.filter((t) => t.date && new Date(t.date) >= cutoff);
   txs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
@@ -97,9 +106,21 @@ function buildDataContext(txs, assistantRole, lookback = 90) {
   const byMonth = {};
   const bySupplier = {};
   const byItem = {};
+  const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10); // WIB
+  const thisMonth = today.slice(0, 7);
+  const bulanIni = {};
+  let transferCount = 0;
 
   for (const t of txs) {
-    const o = t.outlet ?? "UNKNOWN";
+    // Pindah dana antar-dompet bukan pemasukan/pengeluaran usaha.
+    if (t.type === "transfer") { transferCount++; continue; }
+    const o = t.outlet || "Pusat (tanpa outlet: rekening bank/kas besar)";
+    if ((t.date || "").startsWith(thisMonth)) {
+      if (!bulanIni[o]) bulanIni[o] = { in: 0, out: 0, count: 0 };
+      if (t.type === "in") bulanIni[o].in += t.amount || 0;
+      else bulanIni[o].out += t.amount || 0;
+      bulanIni[o].count++;
+    }
     if (!byOutlet[o]) byOutlet[o] = { in: 0, out: 0, count: 0 };
     if (t.type === "in") byOutlet[o].in += t.amount || 0;
     else byOutlet[o].out += t.amount || 0;
@@ -119,6 +140,11 @@ function buildDataContext(txs, assistantRole, lookback = 90) {
   }
 
   const fmt = (n) => `Rp${Number(n).toLocaleString("id-ID")}`;
+
+  const bulanIniSummary = Object.entries(bulanIni)
+    .sort((a, b) => b[1].out - a[1].out)
+    .map(([o, v]) => `  ${o}: pengeluaran ${fmt(v.out)} | pemasukan ${fmt(v.in)} | ${v.count} transaksi`)
+    .join("\n");
 
   const outletSummary = Object.entries(byOutlet)
     .map(([o, v]) => `  ${o}: pemasukan ${fmt(v.in)} | pengeluaran ${fmt(v.out)} | ${v.count} transaksi`)
@@ -155,8 +181,12 @@ function buildDataContext(txs, assistantRole, lookback = 90) {
 
   return `
 === DATA TRANSAKSI NF (${lookback} hari terakhir, total ${txs.length} transaksi) ===
+Hari ini: ${today} (WIB). Bulan ini = ${thisMonth}.${transferCount ? ` ${transferCount} transfer antar-dompet tidak dihitung sebagai pemasukan/pengeluaran.` : ""}
 
-Per outlet:
+Bulan ini (${thisMonth}) per outlet, urut pengeluaran terbesar:
+${bulanIniSummary || "  belum ada transaksi bulan ini"}
+
+Per outlet (${lookback} hari):
 ${outletSummary}
 
 Pengeluaran per bulan:
