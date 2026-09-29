@@ -26,6 +26,7 @@ import { walletOptionLabel } from "../lib/walletDisplay";
 import { todayLocal } from "../lib/laporanKeuangan";
 import { aiParse } from "../lib/appState";
 import { supabase } from "../lib/supabaseClient";
+import { normSearch } from "../lib/inventoryLogic";
 
 // ------------------------------------------------------------
 // Helper: upload struk ke Supabase Storage
@@ -145,40 +146,85 @@ function useBahanMaster(bizId) {
 // ------------------------------------------------------------
 // Komponen item baris belanja
 // ------------------------------------------------------------
-function ItemRow({ item, index, onChange, onRemove }) {
+/** Saran nama bahan: kata diawali ketikan diutamakan, maks 8. */
+function saranBahan(master, q) {
+  const words = normSearch(q).split(" ").filter(Boolean);
+  if (!words.length || !master?.length) return [];
+  const hits = [];
+  for (const b of master) {
+    const n = normSearch(b.nama);
+    if (!words.every((w) => n.includes(w))) continue;
+    const ws = n.split(" ");
+    const skor = (n.startsWith(words[0]) ? 0 : 2) + (words.every((w) => ws.some((x) => x.startsWith(w))) ? 0 : 1);
+    hits.push([skor, n.length, b]);
+  }
+  return hits.sort((x, y) => x[0] - y[0] || x[1] - y[1]).slice(0, 8).map((h) => h[2]);
+}
+
+const ROW_GRID = "minmax(0,1fr) 52px 60px 80px 28px";
+
+function ItemRow({ item, index, onChange, onRemove, bahanMaster }) {
   const subtotal = (Number(item.qty) || 0) * (Number(item.unitPrice) || 0);
+  const [fokus, setFokus] = useState(false);
+  const saran = useMemo(() => (fokus ? saranBahan(bahanMaster, item.name) : []), [fokus, bahanMaster, item.name]);
+  const persis = saran.length === 1 && normSearch(saran[0].nama) === normSearch(item.name);
+  const tampil = saran.length > 0 && !persis;
+  const cell = { ...styles.inp, minWidth: 0 };
   return (
-    <div style={{ marginBottom: 10 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 56px 64px 84px 28px", gap: 5, alignItems: "center" }}>
+    <div style={{ marginBottom: 10, position: "relative" }}>
+      <div style={{ display: "grid", gridTemplateColumns: ROW_GRID, gap: 5, alignItems: "center" }}>
         <input
-          style={styles.inp}
+          style={cell}
           placeholder="Nama item"
-          list="nf3-bahan-master"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
           value={item.name}
-          onChange={e => onChange(index, "name", e.target.value)}
+          onFocus={() => setFokus(true)}
+          onBlur={() => setTimeout(() => setFokus(false), 150)}
+          onChange={e => { setFokus(true); onChange(index, "name", e.target.value); }}
         />
         <input
-          style={styles.inp}
+          style={cell}
           type="number"
+          inputMode="decimal"
           placeholder="Qty"
           value={item.qty}
           onChange={e => onChange(index, "qty", e.target.value)}
         />
         <input
-          style={styles.inp}
+          style={cell}
           placeholder="Satuan"
           value={item.unit}
           onChange={e => onChange(index, "unit", e.target.value)}
         />
         <input
-          style={styles.inp}
+          style={cell}
           type="number"
+          inputMode="numeric"
           placeholder="Harga"
           value={item.unitPrice}
           onChange={e => onChange(index, "unitPrice", e.target.value)}
         />
         <button style={styles.delBtn} onClick={() => onRemove(index)} aria-label="Hapus baris">✕</button>
       </div>
+      {tampil && (
+        <div role="listbox" style={styles.saranBox}>
+          {saran.map((b) => (
+            <button
+              key={b.nama}
+              type="button"
+              role="option"
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => { onChange(index, "name", b.nama); setFokus(false); }}
+              style={styles.saranItem}
+            >
+              <span style={{ fontWeight: 600 }}>{b.nama}</span>
+              {b.satuan && <span style={{ color: "#999", fontSize: 11, marginLeft: 8, flexShrink: 0 }}>stok per {b.satuan}</span>}
+            </button>
+          ))}
+        </div>
+      )}
       {subtotal > 0 && (
         <div style={{ fontSize: 11, color: "#888", textAlign: "right", marginTop: 3, paddingRight: 28 }}>
           Subtotal: {formatRupiah(subtotal)}
@@ -490,17 +536,12 @@ function StepForm({ s, draft, setDraft, onNext, onClose }) {
               <span style={{ color: "#aaa", fontWeight: 400 }}>(opsional, disarankan)</span>
             </label>
             {bahanMaster.length > 0 && (
-              <>
-                <datalist id="nf3-bahan-master">
-                  {bahanMaster.map((b) => <option key={b.nama} value={b.nama} label={b.satuan} />)}
-                </datalist>
-                <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>
-                  Ketik lalu pilih nama dari daftar bahan (sama dengan nama di SO) supaya belanja otomatis masuk stok.
-                </div>
-              </>
+              <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>
+                Ketik lalu pilih nama dari daftar bahan (sama dengan nama di SO) supaya belanja otomatis masuk stok.
+              </div>
             )}
             {draft.items.length > 0 && (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 56px 64px 84px 28px", gap: 5, marginBottom: 6 }}>
+              <div style={{ display: "grid", gridTemplateColumns: ROW_GRID, gap: 5, marginBottom: 6 }}>
                 {["Item", "Qty", "Satuan", "Harga/unit", ""].map((h, i) => (
                   <span key={i} style={{ fontSize: 10, color: "#aaa", textAlign: i > 0 ? "center" : "left" }}>{h}</span>
                 ))}
@@ -513,6 +554,7 @@ function StepForm({ s, draft, setDraft, onNext, onClose }) {
                 index={idx}
                 onChange={handleItemChange}
                 onRemove={removeItem}
+                bahanMaster={bahanMaster}
               />
             ))}
             <button style={styles.addItemBtn} onClick={addItem}>
@@ -946,6 +988,16 @@ const styles = {
   },
   fieldGroup: { marginBottom: 14 },
   label: { fontSize: 11, fontWeight: 500, color: "#888", display: "block", marginBottom: 5 },
+  saranBox: {
+    position: "absolute", left: 0, right: 0, top: 40, zIndex: 20,
+    background: "#fff", border: "1px solid #e0e0e0", borderRadius: 10,
+    boxShadow: "0 8px 24px rgba(0,0,0,0.12)", overflow: "hidden", maxHeight: 300, overflowY: "auto",
+  },
+  saranItem: {
+    display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%",
+    padding: "10px 12px", border: "none", borderBottom: "0.5px solid #f0f0f0", background: "#fff",
+    fontSize: 13, color: "#1a1a1a", textAlign: "left", cursor: "pointer", fontFamily: "inherit",
+  },
   inp: {
     width: "100%", padding: "8px 10px",
     borderRadius: 8, border: "0.5px solid #e0e0e0",
