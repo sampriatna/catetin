@@ -1,6 +1,7 @@
 "use client";
 // SO akhir shift: hitung stok fisik di satu lokasi. Pakai daftar SO outlet (nama & satuan staf) bila ada.
 
+import { showActionToast, toastGagal } from "../../lib/actionToast";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   SHIFTS, buildSoRows, rowsForArea, defaultArea, buildSoLinesFromRows, soToItemQty, itemToSoQty, rowFactor, normSearch, parseQty,
@@ -220,6 +221,7 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
         ...w, count: lines.length, duplicate: !!res?.duplicate, diubah: !!replace,
         ev: { id: res?.id, created_at: new Date().toISOString(), tanggal, shift, catatan: catatanFull }, counts: { ...counts },
       });
+      showActionToast(replace ? "SO berhasil diubah." : `SO tersimpan · ${lines.length} bahan.`, "success");
       setReplace(null);
       setTick((t) => t + 1);
       setCounts({});
@@ -231,7 +233,7 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
       refId.current = makeClientRef("so");
       onSaved?.();
     } catch (e) {
-      setErr(e.message || String(e));
+      setErr(toastGagal(e, "SO gagal disimpan"));
     } finally {
       setBusy("");
     }

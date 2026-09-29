@@ -2,6 +2,8 @@
 // Permintaan & kirim stok gudang → outlet (pengganti form kertas "Permintaan Stok").
 // Outlet minta → gudang kirim qty aktual → outlet cek & terima. Gudang juga bisa kirim langsung.
 
+import { showActionToast, toastGagal } from "../../lib/actionToast";
+import { tandaiAksiSendiri } from "../../lib/liveNotif";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   LOKASI, LOKASI_LABEL, TRANSFER_STATUS, buildSoRows, buildTransferLines, rowsForArea,
@@ -60,8 +62,14 @@ export default function KirimStok({ bizId, user, access, items, templates, onSav
     try { setList(await loadTransfers(bizId)); } catch (e) { setErr(e.message || String(e)); } finally { setLoading(false); }
   }, [bizId]);
   useEffect(() => { reload(); }, [reload]);
+  // Ada perubahan permintaan/kiriman dari HP lain (realtime) → segarkan daftar.
+  useEffect(() => {
+    const on = () => reload();
+    window.addEventListener("nf3:inv-transfer", on);
+    return () => window.removeEventListener("nf3:inv-transfer", on);
+  }, [reload]);
 
-  const finish = (res) => { setDone(res); setView({ mode: "list" }); reload(); onSaved?.(); };
+  const finish = (res) => { showActionToast(res?.msg, "success"); setDone(res); setView({ mode: "list" }); reload(); onSaved?.(); };
 
   if (done) {
     return (
@@ -100,9 +108,11 @@ export default function KirimStok({ bizId, user, access, items, templates, onSav
   async function batal(t) {
     if (!window.confirm("Batalkan permintaan ini?")) return;
     try {
+      tandaiAksiSendiri(t.id, "batal");
       await saveTransfer(bizId, "batal", { id: t.id }, []);
+      showActionToast("Permintaan dibatalkan.", "success");
       reload();
-    } catch (e) { setErr(e.message || String(e)); }
+    } catch (e) { setErr(toastGagal(e, "Gagal membatalkan")); }
   }
 
   return (
@@ -260,7 +270,7 @@ function FormBaru({ bizId, user, access, action, items, templates, itemsById, on
       writeDraft(key, null);
       onDone({ text, msg: `${action === "minta" ? "Permintaan terkirim ke gudang" : "Kiriman tercatat"}${res?.duplicate ? " (sudah pernah tersimpan)" : ""}: ${lines.length} barang.` });
     } catch (e) {
-      setErr(e.message || String(e));
+      setErr(toastGagal(e, "Gagal menyimpan"));
     } finally {
       setBusy("");
     }
@@ -383,7 +393,7 @@ function FormKirim({ bizId, user, t, items, itemsById, onCancel, onDone }) {
       const text = formatTransferWa({ tahap: "kirim", ke: t.ke, dari: t.dari, tanggal: todayJakarta(), by: user?.name, lines: wl, total: res?.total_nilai ?? total, catatan, foto: foto.length });
       onDone({ text, msg: `Kiriman ke ${t.ke} tercatat${res?.duplicate ? " (sudah pernah tersimpan)" : ""}. Outlet tinggal menekan "Cek & terima" saat barang datang.` });
     } catch (e) {
-      setErr(e.message || String(e));
+      setErr(toastGagal(e, "Gagal menyimpan"));
     } finally {
       setBusy("");
     }
@@ -464,7 +474,7 @@ function FormTerima({ bizId, user, t, itemsById, onCancel, onDone }) {
       const text = formatTransferWa({ tahap: "terima", ke: t.ke, dari: t.dari, tanggal: todayJakarta(), by: user?.name, lines: wl, total: res?.total_nilai ?? 0, catatan, foto: foto.length });
       onDone({ text, msg: `Barang diterima di ${t.ke}${beda.length ? ` — ${beda.length} barang selisih` : ", semua sesuai"}.` });
     } catch (e) {
-      setErr(e.message || String(e));
+      setErr(toastGagal(e, "Gagal menyimpan"));
     } finally {
       setBusy("");
     }

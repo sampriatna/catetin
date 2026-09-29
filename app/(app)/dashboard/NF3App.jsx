@@ -143,7 +143,6 @@ import { showActionToast } from "../../../lib/actionToast";
 import { subscribeAppStateChanges } from "../../../lib/appStateRealtime.js";
 import { applyBalanceAdjustment, computeBalanceAdjustment, recentBalanceAdjustments, countBalanceAdjustments } from "../../../lib/adjustSaldo";
 import { playRevisionAlertSound, playNotificationPing, unlockNotificationAudio } from "../../../lib/notificationSound";
-import ActionToast from "../../../components/ActionToast";
 
 const CashflowChart = dynamic(() => import("../../../components/CashflowChart"), {
   ssr: false,
@@ -8923,7 +8922,6 @@ export default function NF3App(props) {
             bottomOffset={effectiveWebMode ? 24 : 88}
           />
         )}
-        <ActionToast />
       </div>
     </div>
   );

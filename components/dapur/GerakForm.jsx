@@ -3,6 +3,7 @@
 // Staf memilih nama yang biasa dipakai (daftar SO outlet), isi jumlah dalam satuan apa pun
 // (gram, porsi, ml, pcs…). Nilai Rp dihitung otomatis dari modal — staf tidak perlu tahu HPP.
 
+import { showActionToast, toastGagal } from "../../lib/actionToast";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Trash2 } from "lucide-react";
 import {
@@ -120,11 +121,12 @@ export default function GerakForm({ mode = "waste", bizId, user, access, lokasi,
         ? formatWasteWa({ lokasi, tanggal, shift, by: user?.name, lines: waLines, total, catatan, foto: foto.length })
         : formatMasukWa({ lokasi, tanggal, by: user?.name, sumber, lines: waLines, total, catatan, foto: foto.length });
       setDone({ text, total, duplicate: !!res?.duplicate });
+      showActionToast(waste ? "Waste tercatat." : "Barang masuk tercatat.", "success");
       setLines([]); setCatatan(""); setFotos([]); setFromWa(null);
       refId.current = makeClientRef(mode);
       onSaved?.();
     } catch (e) {
-      setErr(e.message || String(e));
+      setErr(toastGagal(e, waste ? "Waste gagal disimpan" : "Barang masuk gagal disimpan"));
     } finally {
       setBusy("");
     }

@@ -2,6 +2,7 @@
 // Resep menu (BOM): bahan per 1 porsi menu yang dijual. Dipakai untuk menghitung
 // pemakaian bahan dari data penjualan POS (teori) lalu dibandingkan dengan SO (aktual).
 
+import { showActionToast, toastGagal } from "../../lib/actionToast";
 import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import {
@@ -125,9 +126,10 @@ function MenuEditor({ bizId, menu, lokOptions = OUTLET_JUAL, items, itemsById, t
       });
       // Dibuat dari nama POS yang belum punya resep → langsung dihubungkan.
       if (menu.aliasId) await saveMenuAlias(menu.aliasId, { menu_id: saved.id });
+      showActionToast("Resep tersimpan.", "success");
       onSaved();
     } catch (e) {
-      setErr(e.message || String(e));
+      setErr(toastGagal(e, "Resep gagal disimpan"));
     } finally {
       setBusy(false);
     }
