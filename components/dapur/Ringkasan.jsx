@@ -87,7 +87,7 @@ export default function Ringkasan({ bizId, items, snapshot, events, lokasiScope,
           <div key={`${a.lokasi}-${a.item_id}`} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "6px 0", borderBottom: `1px solid ${C.line}`, fontSize: 13 }}>
             <span>{a.item.nama} <span style={{ color: C.sub }}>· {a.lokasi}</span></span>
             <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              {fmtQty(a.qty)} / min {fmtQty(a.item.min_stok)} <StatusBadge status={a.status} />
+              {fmtQty(a.qty)} / min {fmtQty(a.item.min_stok)} {a.item.satuan} <StatusBadge status={a.status} />
             </span>
           </div>
         ))}

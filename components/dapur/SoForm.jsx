@@ -5,9 +5,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   SHIFTS, buildSoRows, rowsForArea, defaultArea, buildSoLinesFromRows, soToItemQty, itemToSoQty, rowFactor, normSearch, parseQty,
   stockStatus, soDelta, round2, makeClientRef, todayJakarta, formatSoWa, fmtRp, fmtQty,
-  parseWaStock, applyWaToRows, wasteFromWa,
+  parseWaStock, applyWaToRows, wasteFromWa, countsFromSoLines,
 } from "../../lib/inventoryLogic";
-import { submitEvent, uploadFotos } from "../../lib/inventoryRepo";
+import { loadEvents, submitEvent, uploadFotos } from "../../lib/inventoryRepo";
 import { C, card, input, label, Btn, WaButton, Chips, Notice, SearchBox, QtyInput, StatusBadge, FotoPicker, PasteWaPanel, AreaChips, dateInput } from "./ui";
 
 function draftKey(bizId, lokasi, area) {
@@ -19,6 +19,8 @@ function readDraft(key) {
 function writeDraft(key, v) {
   try { v ? localStorage.setItem(key, JSON.stringify(v)) : localStorage.removeItem(key); } catch { /* storage tidak tersedia */ }
 }
+const jam = (t) => new Date(t).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+const UBAH_MS = 24 * 3600 * 1000; // staf outlet boleh ubah SO < 24 jam (sama dengan RPC)
 
 export default function SoForm({ bizId, user, access, lokasi, items, templates, snapshot, onSaved, onWasteFromWa }) {
   const allRows = useMemo(() => buildSoRows(items, templates, lokasi), [items, templates, lokasi]);
@@ -53,7 +55,24 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
   const [done, setDone] = useState(null);
+  const [replace, setReplace] = useState(null); // SO lama yang sedang diubah { id, created_at, tanggal, shift }
+  const [lastSo, setLastSo] = useState(null);
+  const [tick, setTick] = useState(0);
   const refId = useRef(makeClientRef("so"));
+  const manager = access ? !access.isOutlet : true;
+
+  // SO terakhir di lokasi & bagian ini → bisa diubah / dikirim ulang ke WA.
+  useEffect(() => {
+    let alive = true;
+    loadEvents(bizId, { lokasi, jenis: "so", limit: 10 })
+      .then((evs) => {
+        if (!alive) return;
+        const ev = (evs || []).find((e) => (e.area || null) === (effArea || null));
+        setLastSo(ev && (manager || Date.now() - new Date(ev.created_at).getTime() < UBAH_MS) ? ev : null);
+      })
+      .catch(() => alive && setLastSo(null));
+    return () => { alive = false; };
+  }, [bizId, lokasi, effArea, manager, tick]);
 
   useEffect(() => {
     const d = readDraft(key);
@@ -61,6 +80,7 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
     setExtras(d?.extras || []);
     if (d?.shift) setShift(d.shift);
     setDone(null);
+    setReplace(null);
     setErr("");
     setPasteInfo(null);
     setFotos([]);
@@ -118,6 +138,47 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
     if (parsed.notes.length) setCatatan((c) => c || `Menipis (laporan staf): ${parsed.notes.join(", ")}`);
   }
 
+  /** Teks laporan WA dari isian (dipakai saat simpan & kirim ulang). */
+  function buildWa(cts, { tanggal: tg, shift: sh, catatan: ct = "", foto = 0, tambahan = [], denganLalu = true }) {
+    const filledRows = rows.filter((r) => { const v = parseQty(cts[r.key]); return v !== null && !Number.isNaN(v); });
+    let total = 0;
+    let belumKonversi = 0;
+    const waLines = filledRows.map((r) => {
+      const qSo = parseQty(cts[r.key]);
+      const conv = soToItemQty(r, qSo);
+      if (conv.converted) total += conv.qty * (Number(r.item.harga) || 0); else belumKonversi++;
+      const last = denganLalu ? lastByItem[r.item.id] : null;
+      return {
+        grup: hasTemplate ? r.grup : null, nama: r.label, satuan: r.satuan_so, qty: qSo,
+        prevQty: last ? itemToSoQty(r, last.qty, last.satuan || r.item.satuan) : null,
+        statusQty: conv.converted ? conv.qty : null, statusSatuan: conv.converted && conv.satuan !== r.satuan_so ? conv.satuan : null,
+        minStok: conv.converted ? r.item.min_stok : null,
+      };
+    });
+    total = round2(total);
+    const text = formatSoWa({ lokasi, tanggal: tg, shift: sh, by: user?.name, lines: waLines, total, catatan: ct, foto, belumKonversi, tambahan, area: effArea });
+    return { text, total, count: filledRows.length };
+  }
+
+  /** Buka SO tersimpan di form untuk diperbaiki; simpan = ganti SO itu. */
+  function ubahSo(ev, cts = null) {
+    const res = cts ? { counts: cts, missing: [] } : countsFromSoLines(rows, ev.lines);
+    setCounts(res.counts);
+    setShift(ev.shift || "Tutup");
+    setTanggal(ev.tanggal || todayJakarta());
+    setCatatan(String(ev.catatan || "").split("\nTambahan (belum di daftar)")[0].replace(/^Tambahan \(belum di daftar\).*$/s, ""));
+    setReplace({ id: ev.id, created_at: ev.created_at, tanggal: ev.tanggal, shift: ev.shift });
+    setDone(null);
+    setErr(res.missing.length ? `Tidak ada di daftar sekarang (isi ulang bila perlu): ${res.missing.join(", ")}` : "");
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function kirimUlang(ev) {
+    const { counts: cts } = countsFromSoLines(rows, ev.lines);
+    const w = buildWa(cts, { tanggal: ev.tanggal, shift: ev.shift, catatan: ev.catatan || "", foto: (ev.foto || []).length, denganLalu: false });
+    setDone({ ...w, resend: true, ev, counts: cts });
+  }
+
   async function submit() {
     setErr("");
     const { lines, errors } = buildSoLinesFromRows(rows, counts);
@@ -138,26 +199,16 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
         .filter(Boolean).join("\n");
       const res = await submitEvent(bizId, {
         client_ref: refId.current, jenis: "so", lokasi, tanggal, shift, catatan: catatanFull, created_by_name: user?.name, foto, area: effArea,
+        ...(replace ? { replaces: replace.id } : {}),
       }, payload);
-      // Urut sesuai form (grup), pakai nama & satuan staf.
-      const filledRows = rows.filter((r) => { const v = parseQty(counts[r.key]); return v !== null && !Number.isNaN(v); });
-      let total = 0;
-      let belumKonversi = 0;
-      const waLines = filledRows.map((r) => {
-        const qSo = parseQty(counts[r.key]);
-        const conv = soToItemQty(r, qSo);
-        if (conv.converted) total += conv.qty * (Number(r.item.harga) || 0); else belumKonversi++;
-        const last = lastByItem[r.item.id];
-        return {
-          grup: hasTemplate ? r.grup : null, nama: r.label, satuan: r.satuan_so, qty: qSo,
-          prevQty: last ? itemToSoQty(r, last.qty, last.satuan || r.item.satuan) : null,
-          statusQty: conv.converted ? conv.qty : null, statusSatuan: conv.converted && conv.satuan !== r.satuan_so ? conv.satuan : null,
-          minStok: conv.converted ? r.item.min_stok : null,
-        };
+      // Urut sesuai form (grup), pakai nama & satuan staf. SO yang diubah tidak dibandingkan dengan dirinya sendiri.
+      const w = buildWa(counts, { tanggal, shift, catatan, foto: foto.length, tambahan, denganLalu: !replace });
+      setDone({
+        ...w, count: lines.length, duplicate: !!res?.duplicate, diubah: !!replace,
+        ev: { id: res?.id, created_at: new Date().toISOString(), tanggal, shift, catatan: catatanFull }, counts: { ...counts },
       });
-      total = round2(total);
-      const text = formatSoWa({ lokasi, tanggal, shift, by: user?.name, lines: waLines, total, catatan, foto: foto.length, belumKonversi, tambahan, area: effArea });
-      setDone({ text, total, count: lines.length, duplicate: !!res?.duplicate });
+      setReplace(null);
+      setTick((t) => t + 1);
       setCounts({});
       setCatatan("");
       setExtras([]);
@@ -174,14 +225,21 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
   }
 
   if (done) {
+    const bisaUbah = done.ev?.id && (manager || Date.now() - new Date(done.ev.created_at).getTime() < UBAH_MS);
     return (
       <div style={{ display: "grid", gap: 12 }}>
-        <Notice kind="ok">
-          SO tersimpan{done.duplicate ? " (sudah pernah terkirim sebelumnya)" : ""}: {done.count} bahan · nilai stok {fmtRp(done.total)}.
-        </Notice>
-        <pre style={{ ...card, whiteSpace: "pre-wrap", fontSize: 13, margin: 0, fontFamily: "inherit" }}>{done.text}</pre>
+        {done.resend ? (
+          <Notice>Laporan SO {done.ev.tanggal} · {done.ev.shift} (jam {jam(done.ev.created_at)}) — kirim ulang ke grup WhatsApp.</Notice>
+        ) : (
+          <Notice kind="ok">
+            SO {done.diubah ? "diperbarui" : "tersimpan"}{done.duplicate ? " (sudah pernah terkirim sebelumnya)" : ""}: {done.count} bahan · nilai stok {fmtRp(done.total)}.
+            {" "}Jangan lupa kirim laporannya ke WhatsApp.
+          </Notice>
+        )}
         <WaButton text={done.text} />
-        <Btn kind="ghost" onClick={() => setDone(null)}>Isi SO lagi</Btn>
+        {bisaUbah && <Btn kind="ghost" onClick={() => ubahSo(done.ev, done.counts)}>Ubah SO ini</Btn>}
+        <Btn kind="ghost" onClick={() => setDone(null)}>Selesai</Btn>
+        <pre style={{ ...card, whiteSpace: "pre-wrap", fontSize: 13, margin: 0, fontFamily: "inherit" }}>{done.text}</pre>
       </div>
     );
   }
@@ -222,7 +280,27 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
         )}
       </div>
 
-      {Object.keys(lastByItem).length === 0 && (
+      {replace ? (
+        <Notice kind="warn">
+          <b>Mengubah SO {replace.tanggal} · {replace.shift}</b> (tersimpan jam {jam(replace.created_at)}). Perbaiki angkanya lalu simpan — SO lama diganti.
+          <div style={{ marginTop: 8 }}>
+            <button type="button" onClick={() => { setReplace(null); setCounts({}); setErr(""); }}
+              style={{ border: "none", background: "none", padding: 0, color: C.brand, fontWeight: 800, cursor: "pointer" }}>Batal ubah</button>
+          </div>
+        </Notice>
+      ) : lastSo && filledCount === 0 ? (
+        <Notice>
+          SO terakhir: <b>{lastSo.tanggal} · {lastSo.shift || "-"}</b> jam {jam(lastSo.created_at)}{lastSo.created_by_name ? ` oleh ${lastSo.created_by_name}` : ""}.
+          <div style={{ display: "flex", gap: 16, marginTop: 8, flexWrap: "wrap" }}>
+            <button type="button" onClick={() => ubahSo(lastSo)}
+              style={{ border: "none", background: "none", padding: 0, color: C.brand, fontWeight: 800, cursor: "pointer" }}>Ubah SO itu</button>
+            <button type="button" onClick={() => kirimUlang(lastSo)}
+              style={{ border: "none", background: "none", padding: 0, color: C.brand, fontWeight: 800, cursor: "pointer" }}>Kirim ulang ke WA</button>
+          </div>
+        </Notice>
+      ) : null}
+
+      {Object.keys(lastByItem).length === 0 && !replace && (
         <Notice kind="warn">
           <b>SO awal {lokasi === "GDG" ? "Gudang" : "outlet"}</b> — belum pernah ada SO di sini. Hitung <b>semua</b> barang yang ada (yang habis tekan <b>Habis</b>).
           Angka ini jadi stok & nilai awal; SO berikutnya dibandingkan dengan ini.
@@ -332,7 +410,7 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
 
       {err && <Notice kind="bad">{err}</Notice>}
       <Btn onClick={submit} disabled={!!busy || filledCount === 0}>
-        {busy || `Simpan SO (${filledCount} bahan${fotos.length ? ` · ${fotos.length} foto` : ""})`}
+        {busy || `${replace ? "Simpan perubahan SO" : "Simpan SO"} (${filledCount} bahan${fotos.length ? ` · ${fotos.length} foto` : ""})`}
       </Btn>
       {(Object.keys(counts).length > 0 || extras.length > 0) && !busy && (
         <Btn kind="danger" onClick={() => { if (window.confirm("Kosongkan semua isian SO?")) { setCounts({}); setExtras([]); } }}>Kosongkan isian</Btn>
