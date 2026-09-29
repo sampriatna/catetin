@@ -140,8 +140,13 @@ function StatusPill({ status }) {
 }
 
 function TransferCard({ t, itemsById, canKirim, canTerima, canBatal, onKirim, onTerima, onBatal }) {
-  const [open, setOpen] = useState(false);
+  // Permintaan yang masih berjalan langsung terbuka; yang selesai/batal cukup diringkas.
+  const aktif = t.status === "diminta" || t.status === "dikirim";
+  const [open, setOpen] = useState(aktif);
   const who = t.diterima_by_name || t.dikirim_by_name || t.diminta_by_name || "—";
+  const lines = t.lines || [];
+  const num = { textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", paddingLeft: 8 };
+  const qty = (v) => (v == null ? "–" : fmtQty(v));
   return (
     <div style={{ borderTop: `1px solid ${C.line}` }}>
       <button type="button" onClick={() => setOpen(!open)}
@@ -150,25 +155,31 @@ function TransferCard({ t, itemsById, canKirim, canTerima, canBatal, onKirim, on
           <span style={{ fontWeight: 700, fontSize: 14 }}>{t.dari} → {t.ke}{t.area ? ` · ${t.area === "dapur" ? "Dapur" : "Bar"}` : ""}</span>
           <StatusPill status={t.status} />
         </div>
-        <div style={{ fontSize: 12, color: C.sub }}>
-          {t.tanggal} · {(t.lines || []).length} barang · {who}{t.status !== "diminta" ? ` · ${fmtRp(t.total_nilai)}` : ""}
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, color: C.sub }}>
+          <span>{t.tanggal} · {lines.length} barang · {who}{t.status !== "diminta" ? ` · ${fmtRp(t.total_nilai)}` : ""}</span>
+          <span style={{ color: C.brand, fontWeight: 700, whiteSpace: "nowrap" }}>{open ? "Tutup ▴" : "Lihat barang ▾"}</span>
         </div>
       </button>
       {open && (
         <div style={{ padding: "0 14px 10px", fontSize: 13 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: "4px 10px", color: C.sub, fontSize: 11, fontWeight: 700 }}>
-            <span>Barang</span><span>Minta</span><span>Kirim</span><span>Terima</span>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 64px 64px 64px", columnGap: 0, rowGap: 0, alignItems: "baseline" }}>
+            <span style={{ color: C.sub, fontSize: 11, fontWeight: 700, paddingBottom: 4 }}>Barang</span>
+            {["Minta", "Kirim", "Terima"].map((h) => (
+              <span key={h} style={{ ...num, color: C.sub, fontSize: 11, fontWeight: 700, paddingBottom: 4 }}>{h}</span>
+            ))}
+            {lines.map((l) => {
+              const beda = l.qty_terima != null && Number(l.qty_terima) !== Number(l.qty_kirim);
+              const cell = { padding: "5px 0", borderTop: `1px solid ${C.line}` };
+              return [
+                <span key={`${l.id}n`} style={{ ...cell, minWidth: 0, overflowWrap: "anywhere" }}>
+                  {l.label || itemsById[l.item_id]?.nama || "?"} <span style={{ color: C.sub }}>({l.satuan})</span>
+                </span>,
+                <span key={`${l.id}m`} style={{ ...cell, ...num }}>{qty(l.qty_minta)}</span>,
+                <span key={`${l.id}k`} style={{ ...cell, ...num }}>{qty(l.qty_kirim)}</span>,
+                <span key={`${l.id}t`} style={{ ...cell, ...num, color: beda ? C.bad : C.ink }}>{qty(l.qty_terima)}</span>,
+              ];
+            })}
           </div>
-          {(t.lines || []).map((l) => (
-            <div key={l.id} style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: "4px 10px", padding: "3px 0" }}>
-              <span>{l.label || itemsById[l.item_id]?.nama || "?"} <span style={{ color: C.sub }}>({l.satuan})</span></span>
-              <span>{l.qty_minta == null ? "–" : fmtQty(l.qty_minta)}</span>
-              <span>{l.qty_kirim == null ? "–" : fmtQty(l.qty_kirim)}</span>
-              <span style={{ color: l.qty_terima != null && Number(l.qty_terima) !== Number(l.qty_kirim) ? C.bad : C.ink }}>
-                {l.qty_terima == null ? "–" : fmtQty(l.qty_terima)}
-              </span>
-            </div>
-          ))}
           {t.catatan && <div style={{ color: C.sub, marginTop: 6, whiteSpace: "pre-wrap" }}>📝 {t.catatan}</div>}
         </div>
       )}
