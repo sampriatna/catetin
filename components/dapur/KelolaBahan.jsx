@@ -4,7 +4,7 @@
 import { useMemo, useRef, useState } from "react";
 import { Camera, Trash2 } from "lucide-react";
 import { LOKASI, LOKASI_LABEL, TIPE_LABEL, searchItems, normSearch, rowFactor, fmtRp, fmtQty, isiDariKemasan } from "../../lib/inventoryLogic";
-import { bacaKemasan, saveItem, saveRecipe, saveSoTemplate } from "../../lib/inventoryRepo";
+import { bacaKemasan, deleteItem, saveItem, saveRecipe, saveSoTemplate } from "../../lib/inventoryRepo";
 import { C, card, input, label, Btn, Chips, Notice, SearchBox, ItemPicker, QtyInput, selectInput } from "./ui";
 
 const MODES = ["Bahan", "Resep", "Daftar SO", "Cek Lokasi"];
@@ -70,10 +70,23 @@ function ItemEditor({ bizId, item, onDone, onCancel }) {
   const [f, setF] = useState({ ...EMPTY_ITEM, ...item, harga: item?.harga ?? "", min_stok: item?.min_stok ?? "" });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [dipakai, setDipakai] = useState(false);
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
   async function save() {
     setBusy(true); setErr("");
     try { await saveItem(bizId, f); onDone(); } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); }
+  }
+  async function hapus() {
+    if (!window.confirm(`Hapus "${item.nama}" (${item.kode}) dari master bahan?\nBaris daftar SO untuk bahan ini ikut terhapus. Tidak bisa dibatalkan.`)) return;
+    setBusy(true); setErr(""); setDipakai(false);
+    try { await deleteItem(item.id); onDone(); } catch (e) {
+      setErr(e.message || String(e));
+      setDipakai(e.code === "DIPAKAI");
+    } finally { setBusy(false); }
+  }
+  async function nonaktifkan() {
+    setBusy(true); setErr("");
+    try { await saveItem(bizId, { ...f, aktif: false }); onDone(); } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); }
   }
   return (
     <div style={{ ...card, display: "grid", gap: 10 }}>
@@ -130,10 +143,17 @@ function ItemEditor({ bizId, item, onDone, onCancel }) {
         <input type="checkbox" checked={f.aktif !== false} onChange={(e) => set("aktif", e.target.checked)} /> Aktif
       </label>
       {err && <Notice kind="bad">{err}</Notice>}
+      {dipakai && f.aktif !== false && <Btn kind="ghost" onClick={nonaktifkan} disabled={busy}>Nonaktifkan bahan ini</Btn>}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <Btn kind="ghost" onClick={onCancel}>Batal</Btn>
         <Btn onClick={save} disabled={busy}>{busy ? "Menyimpan…" : "Simpan"}</Btn>
       </div>
+      {item?.id && (
+        <button type="button" onClick={hapus} disabled={busy}
+          style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, border: "none", background: "transparent", color: C.bad, fontWeight: 700, fontSize: 14, padding: 8, cursor: "pointer" }}>
+          <Trash2 size={16} /> Hapus bahan
+        </button>
+      )}
     </div>
   );
 }
@@ -209,6 +229,7 @@ export default function KelolaBahan({ bizId, items, recipes, templates, onChange
   const list = useMemo(() => {
     let l = searchItems(items || [], q);
     if (tipe === "cek") l = l.filter((i) => /cek/i.test(i.catatan || "") || !(Number(i.harga) > 0));
+    else if (tipe === "nonaktif") l = l.filter((i) => i.aktif === false);
     else if (tipe !== "all") l = l.filter((i) => i.tipe === tipe);
     return l;
   }, [items, q, tipe]);
@@ -240,6 +261,7 @@ export default function KelolaBahan({ bizId, items, recipes, templates, onChange
               <option value="all">Semua tipe</option>
               {Object.entries(TIPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               <option value="cek">Perlu dicek (harga 0 / catatan cek)</option>
+              <option value="nonaktif">Nonaktif (mis. duplikat)</option>
             </select>
             <div style={{ fontSize: 12, color: C.sub }}>{list.length} bahan</div>
           </div>
