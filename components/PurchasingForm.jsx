@@ -127,6 +127,22 @@ function resolvePurchasingAmount(draft) {
 }
 
 // ------------------------------------------------------------
+// Nama bahan master (Dapur & Stok) sebagai saran nama item — supaya nama belanja sama dengan SO
+// dan otomatis masuk stok lewat padanan. Kosong bila bisnis belum memakai modul stok.
+// ------------------------------------------------------------
+function useBahanMaster(bizId) {
+  const [list, setList] = useState([]);
+  useEffect(() => {
+    if (!bizId) return undefined;
+    let alive = true;
+    supabase.from("inv_items").select("nama, satuan").eq("business_id", bizId).eq("aktif", true).order("nama").limit(1000)
+      .then(({ data }) => { if (alive) setList(data || []); }, () => {});
+    return () => { alive = false; };
+  }, [bizId]);
+  return list;
+}
+
+// ------------------------------------------------------------
 // Komponen item baris belanja
 // ------------------------------------------------------------
 function ItemRow({ item, index, onChange, onRemove }) {
@@ -137,6 +153,7 @@ function ItemRow({ item, index, onChange, onRemove }) {
         <input
           style={styles.inp}
           placeholder="Nama item"
+          list="nf3-bahan-master"
           value={item.name}
           onChange={e => onChange(index, "name", e.target.value)}
         />
@@ -183,6 +200,7 @@ function StepForm({ s, draft, setDraft, onNext, onClose }) {
   const cats      = visibleCategories(categories, s.currentUser, "out");
   const outletOptions = useMemo(() => purchasingOutletOptions(s.currentUser), [s.currentUser]);
   const setupBlocked = cats.length === 0 || myWallets.length === 0;
+  const bahanMaster = useBahanMaster(s.business?.id);
 
   const fileRef   = useRef(null);
   const recRef    = useRef(null);
@@ -471,6 +489,16 @@ function StepForm({ s, draft, setDraft, onNext, onClose }) {
               Detail item{" "}
               <span style={{ color: "#aaa", fontWeight: 400 }}>(opsional, disarankan)</span>
             </label>
+            {bahanMaster.length > 0 && (
+              <>
+                <datalist id="nf3-bahan-master">
+                  {bahanMaster.map((b) => <option key={b.nama} value={b.nama} label={b.satuan} />)}
+                </datalist>
+                <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>
+                  Ketik lalu pilih nama dari daftar bahan (sama dengan nama di SO) supaya belanja otomatis masuk stok.
+                </div>
+              </>
+            )}
             {draft.items.length > 0 && (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 56px 64px 84px 28px", gap: 5, marginBottom: 6 }}>
                 {["Item", "Qty", "Satuan", "Harga/unit", ""].map((h, i) => (
@@ -663,6 +691,12 @@ function StepReview({ s, draft, onSave, onBack, onClose, onNew }) {
               <Row label="Dari"     val={draft.supplier} />
               <Row label="Dompet"   val={wallet?.name || "—"} />
             </div>
+            {draft.items.some((i) => i.name.trim()) && (
+              <button style={{ ...styles.btnPrimary, marginBottom: 8, background: "#1D9E75" }}
+                onClick={() => { window.location.href = "/dapur?tab=masuk"; }}>
+                📦 Masukkan ke stok
+              </button>
+            )}
             <button style={{ ...styles.btnPrimary, marginBottom: 8 }} onClick={() => { setSaved(false); onNew?.(); }}>
               Catat transaksi baru
             </button>

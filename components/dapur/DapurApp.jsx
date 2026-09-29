@@ -14,6 +14,7 @@ import ProduksiForm from "./ProduksiForm";
 import Ringkasan from "./Ringkasan";
 import KelolaBahan from "./KelolaBahan";
 import KirimStok from "./KirimStok";
+import BelanjaKeStok from "./BelanjaKeStok";
 import HariIni from "./HariIni";
 import Penjualan from "./Penjualan";
 import ResepMenu from "./ResepMenu";
@@ -188,7 +189,10 @@ export default function DapurApp({ bizId, user, signOut }) {
               onPrefillUsed={clearWastePrefill} onSaved={reload} />
           )}
           {is("masuk") && (
-            <GerakForm key={`masuk-${lokasi}`} mode="masuk" bizId={bizId} user={user} access={access} lokasi={lokasi} items={items} templates={templates} onSaved={reload} />
+            <>
+              {!access.isOutlet && <BelanjaKeStok bizId={bizId} user={user} access={access} items={items} onSaved={reload} />}
+              <GerakForm key={`masuk-${lokasi}`} mode="masuk" bizId={bizId} user={user} access={access} lokasi={lokasi} items={items} templates={templates} onSaved={reload} />
+            </>
           )}
           {is("audit") && <AuditStok bizId={bizId} user={user} items={items} />}
           {is("produksi") && (

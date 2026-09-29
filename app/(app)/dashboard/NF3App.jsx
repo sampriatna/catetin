@@ -6,6 +6,7 @@ import KategoriPurchasing from "../../../components/KategoriPurchasing";
 const StockValueCard = dynamic(() => import("../../../components/dapur/StockValueCard"), { ssr: false });
 import useDapurToday from "../../../components/dapur/useDapurToday";
 import useStokMenipis from "../../../components/dapur/useStokMenipis";
+import useBelanjaBelumStok from "../../../components/dapur/useBelanjaBelumStok";
 import { fmtJam } from "../../../lib/inventoryLogic";
 import LaporanPurchasing from "../../../components/LaporanPurchasing";
 import AsistenPurchasing from "../../../components/AsistenPurchasing";
@@ -1256,6 +1257,7 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
   });
   // Purchasing: bahan habis / menipis di semua lokasi (dasar belanja & kirim stok).
   const stokMenipisList = useStokMenipis({ bizId, enabled: !!features?.isFnB && user.role === "purchasing" });
+  const belanjaStok = useBelanjaBelumStok({ bizId, enabled: !!features?.isFnB && user.role === "purchasing" });
   const purchasingArea = user.role === "purchasing" && user.outlet && !["KBU", "KSM", "SMT"].includes(user.outlet)
     ? String(user.outlet)
     : "";
@@ -1963,6 +1965,17 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
               done: todayOutTx.length > 0,
               onClick: () => onCatat?.(),
             },
+            ...(features.isFnB && belanjaStok?.belanja ? [{
+              id: "belanjastok",
+              title: `Belanja → Stok (${belanjaStok.belanja})`,
+              subtitle: belanjaStok.belumDikenali
+                ? `${belanjaStok.belumDikenali} barang belum dikenali — pasangkan ke bahan (sekali saja)`
+                : "Belanja sudah dikenali — tinggal masukkan ke stok",
+              done: false,
+              urgent: true,
+              actionLabel: "Masukkan ke stok",
+              onClick: () => { window.location.href = "/dapur?tab=masuk"; },
+            }] : []),
             ...(features.isFnB && stokMenipisList?.length ? [(() => {
               const habis = stokMenipisList.filter((r) => r.status === "habis").length;
               const contoh = stokMenipisList.slice(0, 3).map((r) => `${r.item.nama} (${r.lokasi})`).join(", ");
