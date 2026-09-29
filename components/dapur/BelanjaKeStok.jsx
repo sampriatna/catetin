@@ -6,9 +6,10 @@
 import { showActionToast, toastGagal } from "../../lib/actionToast";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  LOKASI_LABEL, cocokkanBelanja, belanjaKey, lokasiBelanja, ringkasBelanja, parseQty, fmtQty, fmtRp, todayJakarta,
+  LOKASI_LABEL, cocokkanBelanja, belanjaKey, lokasiBelanja, ringkasBelanja, hargaBeliTidakWajar,
+  parseQty, fmtQty, fmtRp, todayJakarta,
 } from "../../lib/inventoryLogic";
-import { loadBelanjaUntukStok, loadPurchaseMaps, savePurchaseMap, saveItem, submitEvent } from "../../lib/inventoryRepo";
+import { loadBelanjaUntukStok, loadPurchaseMaps, savePurchaseMap, submitEvent } from "../../lib/inventoryRepo";
 import { C, card, input, label, Btn, Notice, ItemPicker, selectInput } from "./ui";
 
 export default function BelanjaKeStok({ bizId, user, access, items, onSaved }) {
@@ -117,6 +118,11 @@ function Editor({ bizId, user, access, items, maps, t, onCancel, onDone }) {
     setErr("");
     const kurang = rows.filter((r) => !r.abaikan && !calc(r).ok);
     if (kurang.length) { setErr(`Pasangkan bahan & isi untuk: ${kurang.map((r) => r.line.name).join(", ")} — atau tandai "bukan barang stok".`); return; }
+    const stok = rows.filter((r) => !r.abaikan).map((r) => ({ r, c: calc(r) })).filter((x) => x.c.qty > 0);
+    const hargaAneh = stok.filter(({ c }) => c.harga > 0 && hargaBeliTidakWajar(c.it.harga, c.harga));
+    if (hargaAneh.length && !window.confirm(
+      `Cek lagi konversi harga ini:\n${hargaAneh.map(({ c }) => `• ${c.it.nama}: ${fmtRp(c.it.harga)} → ${fmtRp(c.harga)}/${c.it.satuan}`).join("\n")}\n\nBiasanya ini terjadi karena isi dus/botol/kg salah. Sudah benar?`
+    )) return;
     setBusy(true);
     try {
       // 1) Simpan padanan yang baru dipasang / diubah (sekali saja, berikutnya otomatis).
@@ -129,27 +135,24 @@ function Editor({ bizId, user, access, items, maps, t, onCancel, onDone }) {
           abaikan: r.abaikan, item_id: r.abaikan ? null : r.itemId, isi: r.abaikan ? null : parseQty(r.isi),
         });
       }
-      const stok = rows.filter((r) => !r.abaikan).map((r) => ({ r, c: calc(r) })).filter((x) => x.c.qty > 0);
       if (stok.length) {
-        // 2) Barang masuk (client_ref unik per transaksi → tidak bisa dobel).
-        await submitEvent(bizId, {
+        // 2) Barang masuk + harga beli aktual + pembaruan modal disimpan atomik di database.
+        // Satu request ini menggantikan update harga satu-per-satu setelah event tersimpan.
+        const saved = await submitEvent(bizId, {
           client_ref: `belanja:${t.id}`, jenis: "masuk", sumber: "pembelian", lokasi, tanggal: t.date,
           catatan: `Dari belanja ${t.supplier || ""}${t.meta?.createdByName ? ` (${t.meta.createdByName})` : ""}`.trim(),
           created_by_name: user?.name,
         }, stok.map(({ r, c }) => ({
           item_id: c.it.id, qty: Math.round(c.qty * 10000) / 10000, satuan: c.it.satuan,
           qty_input: Number(r.line.qty) || 0, satuan_input: r.line.unit || null, label: r.line.name,
+          unit_cost: c.harga > 0 ? Math.round(c.harga * 10000) / 10000 : null,
+          update_item_cost: !!r.modal,
         })));
-        // 3) Modal ikut harga beli terbaru.
-        for (const { r, c } of stok) {
-          if (r.modal && c.harga > 0 && Math.abs(c.harga - (Number(c.it.harga) || 0)) > 0.0001) {
-            await saveItem(bizId, { ...c.it, harga: Math.round(c.harga * 10000) / 10000 });
-          }
-        }
+        const nCost = Number(saved?.costs_updated) || 0;
+        onDone(`${stok.length} barang masuk ke stok ${LOKASI_LABEL[lokasi] || lokasi} · harga beli tersimpan${nCost ? ` · ${nCost} modal diperbarui` : ""}.`);
+        return;
       }
-      onDone(stok.length
-        ? `${stok.length} barang masuk ke stok ${LOKASI_LABEL[lokasi] || lokasi}${stok.some(({ r, c }) => r.modal && c.harga > 0) ? " · modal diperbarui" : ""}.`
-        : "Belanja ditandai bukan barang stok.");
+      onDone("Belanja ditandai bukan barang stok.");
     } catch (e) {
       setErr(toastGagal(e, "Gagal masukkan ke stok"));
     } finally {
