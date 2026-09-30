@@ -61,6 +61,15 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
   const [tick, setTick] = useState(0);
   const refId = useRef(makeClientRef("so"));
   const manager = access ? !access.isOutlet : true;
+  const canSeeStockValue = ["owner", "admin"].includes(user?.role || "");
+  const visibleReportText = (text) => canSeeStockValue
+    ? text
+    : String(text || "")
+      .split(/\r?\n/)
+      .filter((line) => !/^\s*💰\s*Nilai stok:/i.test(line))
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
 
   // SO terakhir di lokasi & bagian ini → bisa diubah / dikirim ulang ke WA.
   useEffect(() => {
@@ -198,7 +207,7 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
         prevQty: last && !replace ? itemToSoQty(r, last.qty, last.satuan || r.item.satuan) : null,
       };
     }));
-    if (cek.length && !window.confirm(`Cek lagi angka ini, sepertinya tidak wajar:\n${cek.map((c) => `• ${c.nama}: ${fmtQty(c.qty)} ${c.satuan} (${fmtRp(c.nilai)}${c.prevQty ? ` · SO lalu ${fmtQty(c.prevQty)}` : ""})`).join("\n")}\n\nSudah benar (satuannya ${cek.length > 1 ? "sudah dicek" : "sesuai"})? Tekan OK untuk tetap simpan, Batal untuk memperbaiki.`)) return;
+    if (cek.length && !window.confirm(`Cek lagi angka ini, sepertinya tidak wajar:\n${cek.map((c) => `• ${c.nama}: ${fmtQty(c.qty)} ${c.satuan}${canSeeStockValue ? ` (${fmtRp(c.nilai)}${c.prevQty ? ` · SO lalu ${fmtQty(c.prevQty)}` : ""})` : (c.prevQty ? ` · SO lalu ${fmtQty(c.prevQty)}` : "")}`).join("\n")}\n\nSudah benar (satuannya ${cek.length > 1 ? "sudah dicek" : "sesuai"})? Tekan OK untuk tetap simpan, Batal untuk memperbaiki.`)) return;
     if (belum > 0 && !window.confirm(`${belum} bahan di daftar belum dihitung dan tidak akan disimpan. Lanjut simpan ${lines.length} bahan?`)) return;
     try {
       let foto = [];
@@ -261,7 +270,7 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
           <Notice>Laporan SO {done.ev.tanggal} · {done.ev.shift} (jam {jam(done.ev.created_at)}) — kirim ulang ke grup WhatsApp.</Notice>
         ) : (
           <Notice kind="ok">
-            SO {done.diubah ? "diperbarui" : "tersimpan"}{done.duplicate ? " (sudah pernah terkirim sebelumnya)" : ""}: {done.count} bahan · nilai stok {fmtRp(done.total)}.
+            SO {done.diubah ? "diperbarui" : "tersimpan"}{done.duplicate ? " (sudah pernah terkirim sebelumnya)" : ""}: {done.count} bahan{canSeeStockValue ? <> · nilai stok {fmtRp(done.total)}</> : null}.
             {" "}Jangan lupa kirim laporannya ke WhatsApp.
           </Notice>
         )}
@@ -271,7 +280,7 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
         )}
         {bisaUbah && <Btn kind="ghost" onClick={() => ubahSo(done.ev, done.counts)}>Ubah SO ini</Btn>}
         <Btn kind="ghost" onClick={() => setDone(null)}>Selesai</Btn>
-        <pre style={{ ...card, whiteSpace: "pre-wrap", fontSize: 13, margin: 0, fontFamily: "inherit" }}>{done.text}</pre>
+        <pre style={{ ...card, whiteSpace: "pre-wrap", fontSize: 13, margin: 0, fontFamily: "inherit" }}>{visibleReportText(done.text)}</pre>
       </div>
     );
   }

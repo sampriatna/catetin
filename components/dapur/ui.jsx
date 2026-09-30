@@ -53,10 +53,19 @@ export function Btn({ children, onClick, kind = "primary", disabled, style, type
   );
 }
 
+function whatsappText(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*💰\s*Nilai stok:/i.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export function WaButton({ text, label = "Kirim laporan ke WhatsApp" }) {
   if (!text) return null;
   return (
-    <Btn kind="wa" onClick={() => openWhatsAppShare(text)}>
+    <Btn kind="wa" onClick={() => openWhatsAppShare(whatsappText(text))}>
       <Share2 size={18} /> {label}
     </Btn>
   );
