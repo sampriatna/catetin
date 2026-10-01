@@ -280,6 +280,7 @@ function EditStaffModal({ member, onClose, onSave }) {
   const changeRole = (next) => {
     setRole(next);
     if (next === "admin") setOutlet("");
+    if (next === "purchasing" && KASIR_OUTLETS.has(String(outlet).toUpperCase())) setOutlet("");
     if ((next === "kasir" || next === "dapur") && !KASIR_OUTLETS.has(String(outlet).toUpperCase())) {
       setOutlet("KBU");
     }
