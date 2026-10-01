@@ -6,6 +6,7 @@ import { ArrowLeft, LogOut, RefreshCw } from "lucide-react";
 import { LOKASI_LABEL } from "../../lib/inventoryLogic";
 import { CAP, NO_ACCESS_MSG, dapurAccess, recipesForArea, visibleTabs } from "../../lib/dapurAccess";
 import { loadItems, loadRecipes, loadStockSnapshot, loadEvents, loadSoTemplates, loadMenus, loadMenuAliases } from "../../lib/inventoryRepo";
+import { supabase } from "../../lib/supabaseClient";
 import { C, Notice } from "./ui";
 import SoForm from "./SoForm";
 import GerakForm from "./GerakForm";
@@ -54,6 +55,7 @@ export default function DapurApp({ bizId, user, signOut }) {
   const tabRefs = useRef({});
   const tabBarRef = useRef(null);
   const [tabMore, setTabMore] = useState(false);
+  const samtaroSoBootstrappedRef = useRef(false);
 
   // Pindah tab hanya ke tab yang diizinkan; selain itu kembali ke Hari Ini dengan pesan.
   const setTab = useCallback((t) => {
@@ -89,6 +91,30 @@ export default function DapurApp({ bizId, user, signOut }) {
     if (!bizId || access.key === "none") { setLoading(false); return; }
     setLoading(true); setErr("");
     try {
+      const shouldBootstrapSamtaro =
+        !samtaroSoBootstrappedRef.current &&
+        (access.outlet === "SMT" || lokasi === "SMT");
+
+      if (shouldBootstrapSamtaro) {
+        try {
+          const { data } = await supabase.auth.getSession();
+          const token = data?.session?.access_token;
+          if (token) {
+            const res = await fetch("/api/dapur/samtaro-so-bootstrap", {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ businessId: bizId }),
+            });
+            if (res.ok) samtaroSoBootstrappedRef.current = true;
+          }
+        } catch {
+          // Bootstrap hanya penyempurnaan daftar SO; jangan blok modul stok bila gagal.
+        }
+      }
+
       const [it, rc, sn, ev, tp] = await Promise.all([
         loadItems(bizId), loadRecipes(bizId), loadStockSnapshot(bizId),
         loadEvents(bizId, { lokasi: access.isOutlet ? access.outlet : null, limit: 60 }),
@@ -101,7 +127,7 @@ export default function DapurApp({ bizId, user, signOut }) {
     } finally {
       setLoading(false);
     }
-  }, [bizId, access]);
+  }, [bizId, access, lokasi]);
 
   useEffect(() => { reload(); }, [reload]);
   const clearWastePrefill = useCallback(() => setWastePrefill(null), []);
