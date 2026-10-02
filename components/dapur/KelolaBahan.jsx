@@ -4,7 +4,7 @@
 import { useMemo, useRef, useState } from "react";
 import { Camera, Trash2 } from "lucide-react";
 import { LOKASI, LOKASI_LABEL, TIPE_LABEL, searchItems, normSearch, rowFactor, fmtRp, fmtQty, isiDariKemasan } from "../../lib/inventoryLogic";
-import { bacaKemasan, deleteItem, saveItem, saveRecipe, saveSoTemplate } from "../../lib/inventoryRepo";
+import { bacaKemasan, deleteItem, deleteSoTemplate, saveItem, saveRecipe, saveSoTemplate } from "../../lib/inventoryRepo";
 import { C, card, input, label, Btn, Chips, Notice, SearchBox, ItemPicker, QtyInput, selectInput } from "./ui";
 
 const MODES = ["Bahan", "Resep", "Daftar SO", "Cek Lokasi"];
@@ -248,7 +248,7 @@ export default function KelolaBahan({ bizId, access, items, recipes, templates, 
   const byId = useMemo(() => Object.fromEntries((items || []).map((i) => [i.id, i])), [items]);
 
   const list = useMemo(() => {
-    let l = searchItems(items || [], q);
+    let l = searchItems(items || [], q).filter((i) => !String(i.kode || "").startsWith("__SYS_"));
     if (outlet) l = l.filter((i) => !Array.isArray(i.lokasi) || !i.lokasi.length || i.lokasi.includes(outlet));
     if (tipe === "cek") l = l.filter((i) => /cek/i.test(i.catatan || "") || !(Number(i.harga) > 0));
     else if (tipe === "nonaktif") l = l.filter((i) => i.aktif === false);
@@ -380,6 +380,17 @@ function TemplateEditor({ bizId, row, lokasi, outlet = null, items, templates, o
       onDone();
     } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); }
   }
+
+  async function hapusDariDaftar() {
+    if (!row?.id) return;
+    const nama = f.label || item?.nama || "item ini";
+    if (!window.confirm(`Hapus "${nama}" dari daftar SO ${LOKASI_LABEL[lokasi] || lokasi}?\n\nMaster bahan dan riwayat stok TIDAK ikut dihapus.`)) return;
+    setBusy(true); setErr("");
+    try {
+      await deleteSoTemplate(row.id);
+      onDone();
+    } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); }
+  }
   return (
     <div style={{ ...card, display: "grid", gap: 10 }}>
       <div style={{ fontWeight: 800 }}>{row?.id ? "Ubah baris daftar SO" : "Tambah ke daftar SO"} · {LOKASI_LABEL[lokasi] || lokasi}</div>
@@ -444,7 +455,14 @@ function TemplateEditor({ bizId, row, lokasi, outlet = null, items, templates, o
         <input type="checkbox" checked={f.aktif !== false} onChange={(e) => set("aktif", e.target.checked)} /> Aktif (tampil di form SO)
       </label>
       {err && <Notice kind="bad">{err}</Notice>}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+      <div style={{ display: "grid", gridTemplateColumns: row?.id ? "1fr 1fr 1fr" : "1fr 1fr", gap: 8 }}>
+        {row?.id && (
+          <Btn kind="ghost" onClick={hapusDariDaftar} disabled={busy}>
+            <span style={{ display: "inline-flex", gap: 6, alignItems: "center", color: C.bad }}>
+              <Trash2 size={15} /> Hapus
+            </span>
+          </Btn>
+        )}
         <Btn kind="ghost" onClick={onCancel}>Batal</Btn>
         <Btn onClick={save} disabled={busy}>{busy ? "Menyimpan…" : "Simpan"}</Btn>
       </div>
