@@ -13,6 +13,7 @@ import {
   normalizeScreenshotParse,
   planSummary,
 } from "../lib/cicilan.js";
+import { buildCicilanView, resolvePaylaterSource } from "../lib/cicilanSource.js";
 
 function todayWib() {
   try {
@@ -551,15 +552,32 @@ function CreatePlan({ data, bizId, onBack, onData }) {
 
 // ── Root ──────────────────────────────────────────────────────────────────
 
-export default function CicilanPaylater({ bizId, onChanged }) {
-  const [data, setData] = useState(null);
+// Cache per bisnis: buka ulang tab langsung tampil, lalu diperbarui dari server di belakang.
+const viewCache = new Map();
+
+/** FNB pemilik PayLater: data sudah ada di HP → tampil instan tanpa menunggu server. */
+function localView(bizId, localDoc) {
+  if (!localDoc) return null;
+  const source = resolvePaylaterSource(localDoc, bizId);
+  if (!source || source.viaLink) return null; // Fishing: data ada di FNB, wajib lewat API
+  try {
+    return buildCicilanView(source, localDoc);
+  } catch {
+    return null;
+  }
+}
+
+export default function CicilanPaylater({ bizId, localDoc, onChanged }) {
+  const [data, setData] = useState(() => viewCache.get(bizId) || localView(bizId, localDoc));
   const [err, setErr] = useState("");
   const [view, setView] = useState({ name: "list" });
 
   const load = useCallback(async () => {
     setErr("");
     try {
-      setData(await fetchCicilan(bizId));
+      const fresh = await fetchCicilan(bizId);
+      viewCache.set(bizId, fresh);
+      setData(fresh);
     } catch (e) {
       setErr(e.message || "Gagal memuat cicilan.");
     }
@@ -568,6 +586,7 @@ export default function CicilanPaylater({ bizId, onChanged }) {
   useEffect(() => { load(); }, [load]);
 
   const onData = (res, openPlanId) => {
+    viewCache.set(bizId, res);
     setData(res);
     if (openPlanId) setView({ name: "detail", planId: openPlanId });
     onChanged?.();
@@ -594,13 +613,22 @@ export default function CicilanPaylater({ bizId, onChanged }) {
 }
 
 /** Kartu ringkas beranda — tampil hanya bila ada cicilan berjalan. */
-export function CicilanBerandaCard({ bizId, hide, onOpen }) {
-  const [data, setData] = useState(null);
+export function CicilanBerandaCard({ bizId, localDoc, hide, onOpen }) {
+  // FNB: hitung dari data di HP (ikut realtime, tanpa request). Fishing: lewat API + cache.
+  const local = useMemo(() => localView(bizId, localDoc), [bizId, localDoc]);
+  const [remote, setRemote] = useState(() => viewCache.get(bizId) || null);
   useEffect(() => {
+    if (local) return undefined;
     let alive = true;
-    fetchCicilan(bizId).then((d) => { if (alive) setData(d); }).catch(() => {});
+    fetchCicilan(bizId)
+      .then((d) => {
+        viewCache.set(bizId, d);
+        if (alive) setRemote(d);
+      })
+      .catch(() => {});
     return () => { alive = false; };
-  }, [bizId]);
+  }, [bizId, !!local]);
+  const data = local || remote;
   if (!data) return null;
   const ov = cicilanOverview(data.plans, todayWib());
   if (!ov.activeCount) return null;

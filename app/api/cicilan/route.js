@@ -27,7 +27,7 @@ class HttpError extends Error {
   }
 }
 
-async function authMember(req, businessId) {
+async function authMember(req, businessId, { withProfile = true } = {}) {
   const auth = req.headers.get("authorization") || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   if (!token) throw new HttpError(401, "Sesi login tidak ditemukan.");
@@ -52,7 +52,10 @@ async function authMember(req, businessId) {
   if (!member) throw new HttpError(403, "Anda bukan anggota bisnis ini.");
   if (!canManageCicilan(member.role)) throw new HttpError(403, "Hanya owner/admin yang bisa mengelola cicilan.");
 
-  const { data: profile } = await admin.from("profiles").select("name").eq("id", authData.user.id).maybeSingle();
+  // Nama hanya dipakai untuk meta transaksi (POST) — GET tidak perlu query tambahan.
+  const { data: profile } = withProfile
+    ? await admin.from("profiles").select("name").eq("id", authData.user.id).maybeSingle()
+    : { data: null };
   return {
     admin,
     user: { id: authData.user.id, name: profile?.name || authData.user.email || "Staf", role: member.role },
@@ -69,8 +72,28 @@ async function loadDoc(admin, businessId) {
   return data ? { doc: data.data || {}, updatedAt: data.updated_at } : null;
 }
 
+/** Dokumen app_state bisa sangat besar (semua transaksi, laporan harian, …) — ambil key yang perlu saja. */
+async function loadDocFields(admin, businessId, fields) {
+  const { data, error } = await admin
+    .from("app_state")
+    .select(fields.map((f) => `${f}:data->${f}`).join(","))
+    .eq("business_id", businessId)
+    .maybeSingle();
+  if (error) {
+    console.warn("[api/cicilan] select sebagian gagal, ambil dokumen penuh:", error.message);
+    return loadDoc(admin, businessId);
+  }
+  if (!data) return null;
+  const doc = {};
+  for (const f of fields) if (data[f] != null) doc[f] = data[f];
+  return { doc };
+}
+
+const CONTEXT_FIELDS = ["wallets", "walletSetup"];
+const VIEW_FIELDS = ["wallets", "categories", "transactions", "deletedTransactionIds", "cicilanPlans"];
+
 async function resolveContext(admin, businessId) {
-  const local = await loadDoc(admin, businessId);
+  const local = await loadDocFields(admin, businessId, CONTEXT_FIELDS);
   if (!local) throw new HttpError(404, "Data bisnis belum ada.");
   const source = resolvePaylaterSource(local.doc, businessId);
   if (!source) throw new HttpError(400, "Dompet PayLater belum ada / belum terhubung di bisnis ini.");
@@ -135,9 +158,9 @@ export async function GET(req) {
   try {
     const businessId = new URL(req.url).searchParams.get("businessId");
     if (!businessId) return Response.json({ error: "businessId wajib." }, { status: 400 });
-    const { admin } = await authMember(req, businessId);
+    const { admin } = await authMember(req, businessId, { withProfile: false });
     const source = await resolveContext(admin, businessId);
-    const src = await loadDoc(admin, source.sourceBusinessId);
+    const src = await loadDocFields(admin, source.sourceBusinessId, VIEW_FIELDS);
     if (!src) throw new HttpError(404, "Dokumen bisnis sumber PayLater tidak ditemukan.");
     return Response.json(buildCicilanView(source, src.doc));
   } catch (e) {
