@@ -34,6 +34,7 @@ import { purchasingTxTitle, purchasingTxSubtitle } from "../lib/purchasingItems"
 import { formatPurchasingWa, openWhatsAppShare } from "../lib/shareWa";
 import { walletBalanceAtDate } from "../lib/purchasingKasKecil.js";
 import { visibleWallets } from "../lib/rbac";
+import { shouldHideWalletBalance } from "../lib/walletDisplay";
 
 // ------------------------------------------------------------
 // Helper
@@ -519,7 +520,7 @@ export default function LaporanPurchasing({ s, onClose }) {
               sub={`${totalCount} transaksi`}
               color="#E24B4A"
             />
-            {selectedWalletId && openingBalance != null && transferIn != null && refundIn != null && closingBalance != null && (
+            {selectedWalletId && !shouldHideWalletBalance((s.wallets || []).find((w) => w.id === selectedWalletId), user) && openingBalance != null && transferIn != null && refundIn != null && closingBalance != null && (
               <SummaryCard
                 label="Ringkasan dompet terpilih"
                 value={`Akhir ${fmtMoney(closingBalance)}`}

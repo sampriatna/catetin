@@ -10,6 +10,7 @@ import {
   transactionTypeLabel,
 } from "../lib/transactionEdit";
 import { walletBalance } from "../lib/kasirHarian";
+import { shouldHideWalletBalance } from "../lib/walletDisplay";
 import { resolveTransferIds } from "../lib/transactionNormalize";
 import { isPurchasingTx } from "../lib/purchasingExpense";
 import {
@@ -298,7 +299,7 @@ export default function TransactionEditSheet({ tx, s, onSave, onDelete, onClose 
                 <label style={lbl}>Dompet *</label>
                 <select value={form.walletId} onChange={(e) => set("walletId", e.target.value)} style={inp}>
                   {myWallets.map((w) => (
-                    <option key={w.id} value={w.id}>{w.name} — {fmtRp(walletBalance(w.id, s.wallets, s.transactions))}</option>
+                    <option key={w.id} value={w.id}>{shouldHideWalletBalance(w, user) ? w.name : `${w.name} — ${fmtRp(walletBalance(w.id, s.wallets, s.transactions))}`}</option>
                   ))}
                 </select>
                 {tx.type === "out" && isPurchasing && (
@@ -307,7 +308,7 @@ export default function TransactionEditSheet({ tx, s, onSave, onDelete, onClose 
                     <input value={form.supplier} onChange={(e) => set("supplier", e.target.value)} style={inp} placeholder="Nama toko / pasar" />
                   </>
                 )}
-                {balPreview?.single != null && (
+                {balPreview?.single != null && !shouldHideWalletBalance(s.wallets.find((w) => w.id === form.walletId), user) && (
                   <div style={hintBox}>Saldo dompet saat ini: {fmtRp(balPreview.single)}</div>
                 )}
               </>
