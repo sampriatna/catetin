@@ -132,7 +132,7 @@ import {
 import { canWriteSharedBank } from "../../../lib/sharedBankWrite.js";
 import { fetchSharedBankBalances, fetchSharedBankTransactions, postSharedBankTx } from "../../../lib/repo";
 import CicilanPaylater, { CicilanBerandaCard } from "../../../components/CicilanPaylater";
-import { canManageCicilan, resolvePaylaterSource } from "../../../lib/cicilanSource";
+import { canManageCicilan } from "../../../lib/cicilanSource";
 import PwaInstallBanner, { registerServiceWorker, forceReloadLatestApp } from "../../../components/PwaInstallBanner";
 import { getAppBuildLabel, getAppBuildSha, APP_SW_VERSION } from "../../../lib/buildInfo";
 import { isSectionSynced, healPendingSectionStatuses } from "../../../lib/pendingSectionHeal";
@@ -1513,7 +1513,7 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
         </div>
       )}
 
-      {canManageCicilan(user.role) && bizId && resolvePaylaterSource(s, bizId) && (
+      {canManageCicilan(user.role) && bizId && (
         <CicilanBerandaCard bizId={bizId} hide={hide} onOpen={() => setOverlay("cicilan")} />
       )}
 
@@ -6109,7 +6109,7 @@ function PengaturanScreen({ s, mutate, onClose, setOverlay, setTab, bizId, authU
             </>
           )}
           {canDo(role, "kelolaDompet") && <SRow icon={Wallet} label="Kelola Dompet" sub="Atur dompet dan pembagian uang Anda" onClick={() => setOverlay("wallets")} chev />}
-          {canManageCicilan(role) && bizId && resolvePaylaterSource(s, bizId) && <SRow icon={Banknote} label="Cicilan PayLater" sub="Jadwal & bayar cicilan, bandingkan tenor" onClick={() => setOverlay("cicilan")} chev />}
+          {canManageCicilan(role) && bizId && <SRow icon={Banknote} label="Cicilan PayLater" sub="Jadwal & bayar cicilan, bandingkan tenor" onClick={() => setOverlay("cicilan")} chev />}
           {canDo(role, "kelolaKategoriSendiri") && <SRow icon={Filter} label="Kelola Kategori" sub={canDo(role, "kelolaKategoriSemua") ? "Semua kategori transaksi" : "Kategori untuk role Anda"} onClick={() => setOverlay("categories")} chev />}
           {features?.purchasingModule && canDo(role, "kelolaKategoriSemua") && (
             <SRow icon={Filter} label="Kategori Purchasing" sub="Icon, warna & sembunyikan 13 kelompok belanja" onClick={() => setOverlay("kategoriPurchasing")} chev />
