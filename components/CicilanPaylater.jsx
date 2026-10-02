@@ -48,7 +48,7 @@ const S = {
   pad: { padding: "16px" },
   card: { background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 14, padding: 14, marginBottom: 12 },
   label: { fontSize: 12, fontWeight: 700, color: "var(--ink2, var(--ink))", marginBottom: 6, display: "block" },
-  input: { width: "100%", padding: "11px 12px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)", fontSize: 15 },
+  input: { width: "100%", boxSizing: "border-box", padding: "11px 12px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)", fontSize: 15 },
   btn: { width: "100%", padding: "13px 14px", borderRadius: 12, border: "none", background: "var(--brand)", color: "#fff", fontWeight: 800, fontSize: 15, cursor: "pointer" },
   btnGhost: { padding: "9px 12px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)", fontWeight: 700, fontSize: 13, cursor: "pointer" },
   muted: { fontSize: 12, color: "var(--ink3)" },
@@ -283,31 +283,72 @@ function PlanDetail({ data, plan, bizId, onBack, onData }) {
 
 // ── Buat rencana ─────────────────────────────────────────────────────────────
 
-const DEFAULT_TENORS = [1, 3, 6, 12, 18, 24];
+const TENOR_CHOICES = [1, 3, 6, 12, 18, 24];
+
+/** Perkecil foto/screenshot di HP sebelum dikirim (screenshot iPhone bisa >4 MB → ditolak server). */
+async function compressImage(file, maxDim = 1600, quality = 0.85) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = rej;
+      i.src = url;
+    });
+    const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.naturalWidth * scale);
+    canvas.height = Math.round(img.naturalHeight * scale);
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return { b64: canvas.toDataURL("image/jpeg", quality).split(",")[1], media: "image/jpeg" };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function Step({ n, title, children }) {
+  return (
+    <div style={S.card}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+        <span style={{ width: 22, height: 22, borderRadius: 99, background: "#B45309", color: "#fff", fontSize: 12, fontWeight: 800, display: "grid", placeItems: "center" }}>{n}</span>
+        <span style={{ fontWeight: 800, color: "var(--ink)" }}>{title}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
 
 function CreatePlan({ data, bizId, onBack, onData }) {
   const today = todayWib();
   const [pokok, setPokok] = useState(0);
   const [label, setLabel] = useState("");
-  const [options, setOptions] = useState(DEFAULT_TENORS.map((tenor) => ({ tenor, perBulan: 0 })));
   const [tenor, setTenor] = useState(null);
+  const [perBulan, setPerBulan] = useState(0);
+  const [scanOptions, setScanOptions] = useState([]);
   const [purchaseTxId, setPurchaseTxId] = useState("");
   const [purchaseCategoryId, setPurchaseCategoryId] = useState("");
   const [purchaseDate, setPurchaseDate] = useState(today);
   const [startMonth, setStartMonth] = useState(nextMonth(today));
   const [dueDay, setDueDay] = useState(5);
   const [bungaMode, setBungaMode] = useState("per_bayar");
-  const [bungaCategoryId, setBungaCategoryId] = useState(data.suggestedBungaCategoryId || data.categories[0]?.id || "");
+  const [bungaCategoryId, setBungaCategoryId] = useState(data.suggestedBungaCategoryId || "");
   const [busy, setBusy] = useState(false);
   const [scanBusy, setScanBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [scanMsg, setScanMsg] = useState("");
 
   const linked = data.purchases.find((p) => p.id === purchaseTxId) || null;
   const effPokok = linked ? linked.amount : pokok;
-  const analysis = useMemo(() => analyzeTenorOptions(effPokok, options), [effPokok, options]);
-  const chosen = analysis.rows.find((r) => r.tenor === tenor) || null;
+  const comparison = useMemo(() => analyzeTenorOptions(effPokok, scanOptions), [effPokok, scanOptions]);
+  const chosen = useMemo(
+    () => (tenor && perBulan ? analyzeTenorOptions(effPokok, [{ tenor, perBulan }]).rows[0] || null : null),
+    [effPokok, tenor, perBulan]
+  );
   const preview = useMemo(() => {
-    if (!chosen) return null;
+    if (!chosen || !(effPokok > 0)) return null;
     try {
       return buildJadwal({ pokok: effPokok, tenor: chosen.tenor, perBulan: chosen.perBulan, startMonth, dueDay });
     } catch (e) {
@@ -315,16 +356,13 @@ function CreatePlan({ data, bizId, onBack, onData }) {
     }
   }, [chosen, effPokok, startMonth, dueDay]);
 
-  useEffect(() => {
-    if (tenor == null && analysis.rekomendasi != null) setTenor(analysis.rekomendasi);
-  }, [analysis.rekomendasi, tenor]);
-
-  const setOpt = (t, perBulan) =>
-    setOptions((prev) => {
-      const has = prev.some((o) => o.tenor === t);
-      const next = has ? prev.map((o) => (o.tenor === t ? { ...o, perBulan } : o)) : [...prev, { tenor: t, perBulan }];
-      return next.sort((a, b) => a.tenor - b.tenor);
-    });
+  const pickTenor = (t) => {
+    setTenor(t);
+    const fromScan = scanOptions.find((o) => o.tenor === t);
+    if (fromScan) setPerBulan(fromScan.perBulan);
+    else if (t === 1 && effPokok > 0) setPerBulan(effPokok);
+    else setPerBulan(0);
+  };
 
   const onScreenshot = async (e) => {
     const f = e.target.files?.[0];
@@ -332,21 +370,17 @@ function CreatePlan({ data, bizId, onBack, onData }) {
     if (!f) return;
     setScanBusy(true);
     setErr("");
+    setScanMsg("");
     try {
-      const b64 = await new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = () => res(String(r.result).split(",")[1]);
-        r.onerror = rej;
-        r.readAsDataURL(f);
-      });
-      const parsed = normalizeScreenshotParse(await aiParse({ mode: "cicilan", image: b64, media: f.type }));
-      if (!parsed.options.length) throw new Error("no options");
+      const { b64, media } = await compressImage(f);
+      const parsed = normalizeScreenshotParse(await aiParse({ mode: "cicilan", image: b64, media }));
+      if (!parsed.options.length) throw new Error("Tidak ada pilihan tenor di gambar.");
       if (parsed.pokok && !linked) setPokok(parsed.pokok);
       if (parsed.label && !label) setLabel(parsed.label);
-      setOptions(parsed.options);
-      setTenor(null);
-    } catch {
-      setErr("Screenshot tidak terbaca. Isi nominal per bulan secara manual.");
+      setScanOptions(parsed.options);
+      setScanMsg(`Terbaca ${parsed.options.length} pilihan tenor. Ketuk salah satu di bawah.`);
+    } catch (e2) {
+      setErr(`Screenshot tidak terbaca (${e2?.message || "error"}). Isi manual saja di langkah 2.`);
     }
     setScanBusy(false);
   };
@@ -361,6 +395,7 @@ function CreatePlan({ data, bizId, onBack, onData }) {
   };
 
   const valid = effPokok > 0 && label.trim() && chosen && preview && !preview.error && dueDay >= 1 && dueDay <= 31;
+  const missing = !label.trim() ? "Isi nama barang" : !(effPokok > 0) ? "Isi total yang dicicil" : !tenor ? "Pilih tenor" : !(perBulan > 0) ? "Isi cicilan per bulan" : preview?.error || null;
 
   const submit = async () => {
     if (!valid || busy) return;
@@ -379,7 +414,7 @@ function CreatePlan({ data, bizId, onBack, onData }) {
           perBulan: chosen.perBulan,
           startMonth,
           dueDay,
-          bungaMode,
+          bungaMode: chosen.tanpaBunga ? "per_bayar" : bungaMode,
           bungaCategoryId: bungaCategoryId || null,
           purchaseDate,
         },
@@ -396,127 +431,120 @@ function CreatePlan({ data, bizId, onBack, onData }) {
       <button style={{ ...S.btnGhost, marginBottom: 12 }} onClick={onBack}>← Kembali</button>
       {err && <div style={S.err}>{err}</div>}
 
-      <div style={S.card}>
-        <div style={{ fontWeight: 800, marginBottom: 4, color: "var(--ink)" }}>1. Pilihan tenor</div>
-        <div style={{ ...S.muted, marginBottom: 10 }}>Upload screenshot layar SPayLater, atau isi manual nominal per bulan yang muncul di aplikasi.</div>
-        <label style={{ ...S.btnGhost, display: "block", textAlign: "center", marginBottom: 12, cursor: scanBusy ? "wait" : "pointer" }}>
-          {scanBusy ? "Membaca screenshot…" : "📷 Upload screenshot cicilan"}
-          <input type="file" accept="image/*" style={{ display: "none" }} onChange={onScreenshot} disabled={scanBusy} />
-        </label>
-
+      <Step n={1} title="Barang yang dicicil">
+        <Field label="Nama barang">
+          <input style={S.input} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="mis. DJI Osmo Pocket 4P" />
+        </Field>
         {data.purchases.length > 0 && (
-          <Field label="Belanja PayLater yang sudah dicatat (opsional)" hint="Pilih jika belanjanya sudah dicatat. Kosongkan untuk mencatat belanja baru sekalian.">
+          <Field label="Sudah dicatat sebagai belanja PayLater?" hint="Kalau belum, biarkan “Belum” — belanjanya ikut dicatat otomatis.">
             <select style={S.input} value={purchaseTxId} onChange={(e) => pickPurchase(e.target.value)}>
-              <option value="">— Belanja baru —</option>
+              <option value="">Belum dicatat</option>
               {data.purchases.map((p) => (
                 <option key={p.id} value={p.id}>{shortDate(p.date)} · {money(p.amount)} · {p.desc || "tanpa ket."}</option>
               ))}
             </select>
           </Field>
         )}
-
-        <Field label="Total yang dicicil (pokok)" hint={linked ? "Mengikuti nominal belanja yang dipilih." : "Total pesanan (termasuk proteksi & biaya layanan) yang dibayar pakai PayLater."}>
-          {linked ? <div className="money" style={{ ...S.input, background: "var(--surface2)" }}>{money(linked.amount)}</div> : <MoneyInput value={pokok} onChange={setPokok} placeholder="12.798.580" />}
+        <Field label="Total yang dicicil" hint={linked ? "Mengikuti nominal belanja yang dipilih." : "Total Pesanan di Shopee (sudah termasuk proteksi & biaya layanan)."}>
+          {linked ? <div className="money" style={{ ...S.input, background: "var(--surface2)" }}>{money(linked.amount)}</div> : <MoneyInput value={pokok} onChange={setPokok} placeholder="Rp" />}
         </Field>
+      </Step>
 
-        <span style={S.label}>Nominal per bulan</span>
-        {options.map((o) => (
-          <div key={o.tenor} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
-            <div style={{ width: 64, fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>{o.tenor} bln</div>
-            <div style={{ flex: 1 }}><MoneyInput value={o.perBulan} onChange={(v) => setOpt(o.tenor, v)} placeholder="—" /></div>
+      <Step n={2} title="Tenor yang Anda pilih">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+          {TENOR_CHOICES.map((t) => (
+            <button key={t} onClick={() => pickTenor(t)}
+              style={{ ...S.btnGhost, minWidth: 64, border: tenor === t ? "2px solid #B45309" : "1px solid var(--line)", background: tenor === t ? "#FFFBEB" : "var(--surface)", color: tenor === t ? "#92400E" : "var(--ink)" }}>
+              {t} bln
+            </button>
+          ))}
+        </div>
+        {tenor && (
+          <Field label={`Cicilan per bulan (${tenor} bln)`} hint="Lihat angka “Rp… x bln” di layar SPayLater.">
+            <MoneyInput value={perBulan} onChange={setPerBulan} placeholder="Rp" />
+          </Field>
+        )}
+        {chosen && effPokok > 0 && (
+          <div style={{ padding: 10, borderRadius: 10, fontSize: 13, background: chosen.tanpaBunga ? "#ECFDF5" : "#FEF3C7", color: chosen.tanpaBunga ? "#047857" : "#92400E" }}>
+            Total bayar <b>{money(chosen.total)}</b> ·{" "}
+            {chosen.tanpaBunga ? <b>bunga 0% 👍</b> : <>bunga <b>{money(chosen.bunga)}</b> ({pct(chosen.flatPerBulanPct)}/bln)</>}
           </div>
-        ))}
-      </div>
+        )}
 
-      {analysis.rows.length > 0 && effPokok > 0 && (
-        <div style={S.card}>
-          <div style={{ fontWeight: 800, marginBottom: 10, color: "var(--ink)" }}>2. Bandingkan & pilih</div>
-          {analysis.rows.map((r) => {
-            const active = r.tenor === tenor;
-            const rec = r.tenor === analysis.rekomendasi;
-            return (
-              <button key={r.tenor} onClick={() => setTenor(r.tenor)}
-                style={{ width: "100%", textAlign: "left", padding: 10, borderRadius: 10, marginBottom: 8, cursor: "pointer", border: active ? "2px solid #B45309" : "1px solid var(--line)", background: active ? "#FFFBEB" : "var(--surface)" }}>
+        <details style={{ marginTop: 12 }}>
+          <summary style={{ fontSize: 13, fontWeight: 700, color: "var(--brand)", cursor: "pointer" }}>Bandingkan semua tenor dari screenshot (opsional)</summary>
+          <div style={{ marginTop: 10 }}>
+            <label style={{ ...S.btnGhost, display: "block", textAlign: "center", marginBottom: 10, cursor: scanBusy ? "wait" : "pointer" }}>
+              {scanBusy ? "Membaca screenshot…" : "📷 Upload screenshot pilihan cicilan"}
+              <input type="file" accept="image/*" style={{ display: "none" }} onChange={onScreenshot} disabled={scanBusy} />
+            </label>
+            {scanMsg && <div style={S.ok}>{scanMsg}</div>}
+            {comparison.rows.map((r) => (
+              <button key={r.tenor} onClick={() => { setTenor(r.tenor); setPerBulan(r.perBulan); }}
+                style={{ width: "100%", textAlign: "left", padding: 10, borderRadius: 10, marginBottom: 8, cursor: "pointer", border: tenor === r.tenor ? "2px solid #B45309" : "1px solid var(--line)", background: tenor === r.tenor ? "#FFFBEB" : "var(--surface)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                  <b style={{ color: active ? "#111827" : "var(--ink)" }}>{r.tenor} bln × {money(r.perBulan)}</b>
-                  {rec && <span style={{ fontSize: 10, fontWeight: 800, color: "#047857" }}>DISARANKAN</span>}
+                  <b style={{ color: tenor === r.tenor ? "#111827" : "var(--ink)" }}>{r.tenor} bln × {money(r.perBulan)}</b>
+                  {r.tenor === comparison.rekomendasi && <span style={{ fontSize: 10, fontWeight: 800, color: "#047857" }}>DISARANKAN</span>}
                 </div>
-                <div style={{ fontSize: 12, marginTop: 3, color: r.tanpaBunga ? "#047857" : r.flatPerBulanPct > 0.02 ? "#B91C1C" : "#B45309" }}>
-                  {r.tanpaBunga
-                    ? `0% · total ${money(r.total)}`
-                    : `+${money(r.bunga)} (${pct(r.bungaPct)} total · ${pct(r.flatPerBulanPct)}/bln flat) · total ${money(r.total)}`}
+                <div style={{ fontSize: 12, marginTop: 3, color: r.tanpaBunga ? "#047857" : "#B91C1C" }}>
+                  {r.tanpaBunga ? "0% · tanpa bunga" : `+${money(r.bunga)} bunga (${pct(r.flatPerBulanPct)}/bln)`}
                 </div>
               </button>
-            );
-          })}
-          {chosen && !chosen.tanpaBunga && analysis.rows.some((r) => r.tanpaBunga) && (
-            <div style={{ ...S.muted, color: "#B45309" }}>Ada tenor 0%. Tenor ini lebih mahal {money(chosen.bunga)}.</div>
-          )}
-        </div>
-      )}
-
-      {chosen && (
-        <div style={S.card}>
-          <div style={{ fontWeight: 800, marginBottom: 10, color: "var(--ink)" }}>3. Detail</div>
-          <Field label="Nama barang / keterangan">
-            <input style={S.input} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="DJI Osmo Pocket 4P" />
-          </Field>
-          {!linked && (
-            <>
-              <Field label="Kategori belanja">
-                <select style={S.input} value={purchaseCategoryId} onChange={(e) => setPurchaseCategoryId(e.target.value)}>
-                  <option value="">— Tanpa kategori —</option>
-                  {data.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </Field>
-              <Field label="Tanggal belanja">
-                <input type="date" style={S.input} value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
-              </Field>
-            </>
-          )}
-          <div style={{ display: "flex", gap: 8 }}>
-            <div style={{ flex: 1 }}>
-              <Field label="Cicilan pertama">
-                <input type="month" style={S.input} value={startMonth} onChange={(e) => setStartMonth(e.target.value)} />
-              </Field>
-            </div>
-            <div style={{ width: 110 }}>
-              <Field label="Tgl jatuh tempo">
-                <input type="number" min={1} max={31} style={S.input} value={dueDay} onChange={(e) => setDueDay(Number(e.target.value) || 0)} />
-              </Field>
-            </div>
+            ))}
           </div>
-          {!chosen.tanpaBunga && (
-            <>
-              <Field label="Bunga dicatat">
-                <div style={{ display: "flex", gap: 8 }}>
-                  {[["per_bayar", "Saat bayar tiap bulan"], ["di_awal", "Sekaligus di awal"]].map(([v, t]) => (
-                    <button key={v} onClick={() => setBungaMode(v)}
-                      style={{ ...S.btnGhost, flex: 1, border: bungaMode === v ? "2px solid var(--brand)" : "1px solid var(--line)" }}>{t}</button>
-                  ))}
-                </div>
-              </Field>
-              <Field label="Kategori bunga">
-                <select style={S.input} value={bungaCategoryId} onChange={(e) => setBungaCategoryId(e.target.value)}>
-                  <option value="">— Tanpa kategori —</option>
-                  {data.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </Field>
-            </>
-          )}
-          {preview?.error && <div style={S.err}>{preview.error}</div>}
-          {preview && !preview.error && (
-            <div style={{ ...S.muted, marginBottom: 12, lineHeight: 1.5 }}>
-              {preview.length}× {money(chosen.perBulan)} · pertama {shortDate(preview[0].due)} · terakhir {shortDate(preview[preview.length - 1].due)}.
-              {!linked && <> Belanja {money(effPokok)} dicatat sebagai pengeluaran dari {data.paylater.name}.</>}
-              {bungaMode === "di_awal" && chosen.bunga > 0 && <> Bunga {money(chosen.bunga)} langsung dicatat sebagai hutang.</>}
-            </div>
-          )}
-          <button style={{ ...S.btn, opacity: valid && !busy ? 1 : 0.6 }} disabled={!valid || busy} onClick={submit}>
-            {busy ? "Menyimpan…" : "Simpan rencana cicilan"}
-          </button>
+        </details>
+      </Step>
+
+      <Step n={3} title="Jatuh tempo & pencatatan">
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <Field label="Bayar pertama bulan">
+              <input type="month" style={S.input} value={startMonth} onChange={(e) => setStartMonth(e.target.value)} />
+            </Field>
+          </div>
+          <div style={{ width: 110 }}>
+            <Field label="Tiap tanggal">
+              <input type="number" min={1} max={31} style={S.input} value={dueDay} onChange={(e) => setDueDay(Number(e.target.value) || 0)} />
+            </Field>
+          </div>
         </div>
-      )}
+        {!linked && (
+          <Field label="Kategori belanja (opsional)">
+            <select style={S.input} value={purchaseCategoryId} onChange={(e) => setPurchaseCategoryId(e.target.value)}>
+              <option value="">— Tanpa kategori —</option>
+              {data.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </Field>
+        )}
+        {chosen && !chosen.tanpaBunga && (
+          <>
+            <Field label="Bunga dicatat">
+              <div style={{ display: "flex", gap: 8 }}>
+                {[["per_bayar", "Tiap bayar"], ["di_awal", "Sekaligus di awal"]].map(([v, t]) => (
+                  <button key={v} onClick={() => setBungaMode(v)}
+                    style={{ ...S.btnGhost, flex: 1, border: bungaMode === v ? "2px solid var(--brand)" : "1px solid var(--line)" }}>{t}</button>
+                ))}
+              </div>
+            </Field>
+            <Field label="Kategori bunga">
+              <select style={S.input} value={bungaCategoryId} onChange={(e) => setBungaCategoryId(e.target.value)}>
+                <option value="">— Tanpa kategori —</option>
+                {data.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </Field>
+          </>
+        )}
+        {preview && !preview.error && (
+          <div style={{ ...S.muted, marginBottom: 12, lineHeight: 1.5 }}>
+            {preview.length}× {money(chosen.perBulan)}, mulai {shortDate(preview[0].due)} s/d {shortDate(preview[preview.length - 1].due)}.
+            {!linked && <> Belanja {money(effPokok)} dicatat dari {data.paylater.name}.</>}
+          </div>
+        )}
+        <button style={{ ...S.btn, opacity: valid && !busy ? 1 : 0.6 }} disabled={!valid || busy} onClick={submit}>
+          {busy ? "Menyimpan…" : "Simpan rencana cicilan"}
+        </button>
+        {!valid && missing && <div style={{ ...S.muted, textAlign: "center", marginTop: 8 }}>{missing}</div>}
+      </Step>
     </div>
   );
 }
