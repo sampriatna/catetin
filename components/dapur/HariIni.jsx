@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, ChevronRight, Circle, AlertTriangle } from "lucide-react";
 import {
-  LOKASI, LOKASI_LABEL, PRIORITY, PRIORITY_LABEL, summarizeDapurToday, soAreaStatus, stokMenipis, todayJakarta, fmtJam, fmtRp, fmtQty,
+  LOKASI, LOKASI_LABEL, PRIORITY, PRIORITY_LABEL, summarizeDapurToday, soAreaStatus, stokMenipis, stockRowsFor, todayJakarta, fmtJam, fmtRp, fmtQty,
 } from "../../lib/inventoryLogic";
 import { loadDapurToday } from "../../lib/inventoryRepo";
 import { C, card, Notice } from "./ui";
@@ -41,7 +41,7 @@ function ActionChip({ label: text, onClick }) {
   );
 }
 
-export default function HariIni({ bizId, user, access, lokasi, items, snapshot, onGo }) {
+export default function HariIni({ bizId, user, access, lokasi, items, snapshot, running, onGo }) {
   const acc = access || dapurAccess(user);
   const manager = acc.isOwner;
   const doesGudang = acc.can(CAP.SO) && !acc.isOutlet && !manager; // gudang / purchasing merangkap gudang
@@ -65,7 +65,7 @@ export default function HariIni({ bizId, user, access, lokasi, items, snapshot, 
 
   // Outlet: stok outletnya. Purchasing / gudang / owner: semua lokasi (belanja & kirim untuk outlet juga).
   const alertLokasi = acc.isOutlet ? [acc.outlet] : acc.lihatLokasi;
-  const menipis = useMemo(() => stokMenipis(snapshot, items, alertLokasi).slice(0, 20), [snapshot, items, alertLokasi]);
+  const menipis = useMemo(() => stokMenipis(stockRowsFor(running, snapshot), items, alertLokasi).slice(0, 20), [running, snapshot, items, alertLokasi]);
 
   if (err) return <Notice kind="bad">Status hari ini belum bisa dimuat: {err}</Notice>;
   if (!st) return <div style={{ padding: 30, textAlign: "center", color: C.sub }}>Memuat…</div>;

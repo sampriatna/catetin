@@ -23,7 +23,7 @@ function writeDraft(key, v) {
 const jam = (t) => new Date(t).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
 const UBAH_MS = 24 * 3600 * 1000; // staf outlet boleh ubah SO < 24 jam (sama dengan RPC)
 
-export default function SoForm({ bizId, user, access, lokasi, items, templates, snapshot, onSaved, onWasteFromWa, onBuatPermintaan }) {
+export default function SoForm({ bizId, user, access, lokasi, items, templates, snapshot, running, onSaved, onWasteFromWa, onBuatPermintaan }) {
   const allRows = useMemo(() => buildSoRows(items, templates, lokasi), [items, templates, lokasi]);
   // Daftar dibagi per area (dapur / bar) bila outlet punya akun terpisah; Samtaro tanpa area = satu daftar.
   const hasArea = allRows.some((r) => r.area);
@@ -38,6 +38,13 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
     for (const r of snapshot || []) if (r.lokasi === lokasi) m[r.item_id] = r;
     return m;
   }, [snapshot, lokasi]);
+
+  // Stok berjalan per bahan di lokasi ini (SO lalu + masuk − keluar sejak SO).
+  const runningByItem = useMemo(() => {
+    const m = {};
+    for (const r of running || []) if (r.lokasi === lokasi) m[r.item_id] = r;
+    return m;
+  }, [running, lokasi]);
 
   const key = draftKey(bizId, lokasi, effArea);
   const [counts, setCounts] = useState({});
@@ -387,7 +394,9 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
           const curOk = cur !== null && !Number.isNaN(cur);
           const f = rowFactor(r);
           const curItem = curOk && f !== null ? soToItemQty(r, cur).qty : null;
-          const st = stockStatus(curItem ?? (last && (last.satuan || it.satuan) === it.satuan ? last.qty : null), it.min_stok);
+          const run = runningByItem[it.id];
+          const runQty = run && run.qty !== null && run.qty !== undefined ? Number(run.qty) : null;
+          const st = stockStatus(curItem ?? (runQty !== null ? runQty : (last && (last.satuan || it.satuan) === it.satuan ? last.qty : null)), it.min_stok);
           const lastSo = last ? itemToSoQty(r, last.qty, last.satuan || it.satuan) : null;
           const d = curOk ? soDelta(lastSo, cur) : null;
           const showHead = grup === "Semua" && (idx === 0 || visible[idx - 1].grup !== r.grup);
@@ -405,6 +414,9 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
                     {f === null ? <span style={{ color: C.warn }}> · konversi ke {it.satuan} belum diatur</span> : ""}
                     {last ? ` · SO lalu ${lastSo !== null ? `${fmtQty(lastSo)} ${r.satuan_so}` : `${fmtQty(last.qty)} ${last.satuan || it.satuan}`} (${last.tanggal}${last.shift ? ` ${last.shift}` : ""})` : " · belum pernah SO"}
                     {d !== null && d !== 0 ? ` · ${d > 0 ? "+" : ""}${fmtQty(d)}` : ""}
+                    {run && (Number(run.masuk) > 0 || Number(run.keluar) > 0) && f !== null
+                      ? <span style={{ color: C.brand, fontWeight: 700 }}>{` · tercatat sekarang ${fmtQty(itemToSoQty(r, run.qty_raw < 0 ? 0 : run.qty_raw, it.satuan))} ${r.satuan_so}${Number(run.masuk) > 0 ? ` (+masuk ${fmtQty(itemToSoQty(r, Number(run.masuk), it.satuan))}` : " ("}${Number(run.keluar) > 0 ? `${Number(run.masuk) > 0 ? " " : ""}−keluar ${fmtQty(itemToSoQty(r, Number(run.keluar), it.satuan))}` : ""})`}</span>
+                      : null}
                     {it.min_stok ? ` · min ${fmtQty(it.min_stok)} ${it.satuan}` : ""}
                   </div>
                 </div>

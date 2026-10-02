@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, LogOut, RefreshCw } from "lucide-react";
 import { LOKASI_LABEL } from "../../lib/inventoryLogic";
 import { CAP, NO_ACCESS_MSG, dapurAccess, recipesForArea, visibleTabs } from "../../lib/dapurAccess";
-import { loadItems, loadRecipes, loadStockSnapshot, loadEvents, loadSoTemplates, loadMenus, loadMenuAliases } from "../../lib/inventoryRepo";
+import { loadItems, loadRecipes, loadStockSnapshot, loadStockRunning, loadEvents, loadSoTemplates, loadMenus, loadMenuAliases } from "../../lib/inventoryRepo";
 import { supabase } from "../../lib/supabaseClient";
 import { C, Notice } from "./ui";
 import SoForm from "./SoForm";
@@ -43,6 +43,7 @@ export default function DapurApp({ bizId, user, signOut }) {
   const [items, setItems] = useState([]);
   const [recipes, setRecipes] = useState([]);
   const [snapshot, setSnapshot] = useState([]);
+  const [running, setRunning] = useState(null); // stok berjalan (null = fungsi belum ada → pakai SO terakhir)
   const [events, setEvents] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [wastePrefill, setWastePrefill] = useState(null);
@@ -115,13 +116,14 @@ export default function DapurApp({ bizId, user, signOut }) {
         }
       }
 
-      const [it, rc, sn, ev, tp] = await Promise.all([
+      const [it, rc, sn, ev, tp, rn] = await Promise.all([
         loadItems(bizId), loadRecipes(bizId), loadStockSnapshot(bizId),
         loadEvents(bizId, { lokasi: access.isOutlet ? access.outlet : null, limit: 60 }),
         // Daftar SO outlet opsional: kalau tabel belum dimigrasi, form tetap jalan pakai daftar bahan.
         loadSoTemplates(bizId).catch(() => []),
+        loadStockRunning(bizId).catch(() => null),
       ]);
-      setItems(it); setRecipes(rc); setSnapshot(sn); setEvents(ev); setTemplates(tp);
+      setItems(it); setRecipes(rc); setSnapshot(sn); setEvents(ev); setTemplates(tp); setRunning(rn);
     } catch (e) {
       setErr(e.message || String(e));
     } finally {
@@ -203,10 +205,10 @@ export default function DapurApp({ bizId, user, signOut }) {
       ) : (
         <>
           {is("hari") && (
-            <HariIni bizId={bizId} user={user} access={access} lokasi={lokasi} items={items} snapshot={snapshot} onGo={setTab} />
+            <HariIni bizId={bizId} user={user} access={access} lokasi={lokasi} items={items} snapshot={snapshot} running={running} onGo={setTab} />
           )}
           {is("so") && (
-            <SoForm bizId={bizId} user={user} access={access} lokasi={lokasi} items={items} templates={templates} snapshot={snapshot} onSaved={reload}
+            <SoForm bizId={bizId} user={user} access={access} lokasi={lokasi} items={items} templates={templates} snapshot={snapshot} running={running} onSaved={reload}
               onWasteFromWa={(w) => { setWastePrefill(w); setTab("waste"); }}
               onBuatPermintaan={() => { setBukaMinta(true); setTab("kirim"); }} />
           )}
@@ -228,7 +230,7 @@ export default function DapurApp({ bizId, user, signOut }) {
           {is("kirim") && <KirimStok bizId={bizId} user={user} access={access} items={items} templates={templates} onSaved={reload}
             bukaMinta={bukaMinta} onDibuka={() => setBukaMinta(false)} />}
           {is("ringkasan") && (
-            <Ringkasan bizId={bizId} items={items} snapshot={snapshot} events={events} lokasiScope={access.lihatLokasi}
+            <Ringkasan bizId={bizId} items={items} snapshot={snapshot} running={running} events={events} lokasiScope={access.lihatLokasi}
               canDelete={access.can(CAP.HAPUS_RIWAYAT)} onChanged={reload} />
           )}
           {is("penjualan") && (

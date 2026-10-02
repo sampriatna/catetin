@@ -110,8 +110,18 @@ Kartu **Nilai Stok** (beranda owner/admin & tab Stok & Riwayat): total dan per l
 - Setiap baris SO menyimpan juga angka & satuan asli yang ditulis staf (`qty_input`, `satuan_input`, `label`).
 - Foto disimpan di bucket privat `inv-foto/<business_id>/<tanggal>/…` (dikompres ±1280px), hanya anggota bisnis yang bisa melihat.
 - Kirim stok: status `diminta → dikirim → diterima` (atau `batal` sebelum dikirim). Hanya owner/admin/purchasing yang mengirim; hanya outlet tujuan (atau manajer) yang menerima; kasir hanya bisa meminta untuk outletnya. Nilai = qty × isi konversi × modal saat dikirim.
-- Kiriman belum mengubah angka SO. Stok tetap diambil dari SO terakhir; kiriman dipakai untuk mengecek selisih.
+- Kiriman belum mengubah angka SO. Angka resmi tetap SO fisik; kiriman dipakai untuk mengecek selisih dan ikut dihitung di **stok berjalan** (di bawah).
 - Nilai stok hanya menghitung bahan yang pernah di-SO. Menghapus input produksi tidak mengembalikan modal lama barang hasil.
+
+## Stok berjalan
+
+Stok yang tampil = **SO terakhir + barang masuk / hasil produksi / kiriman diterima − waste / bahan produksi / kiriman keluar sejak SO itu** (RPC `inv_stock_running`). Dipakai di:
+
+- form **SO Shift**: tiap baris menampilkan "tercatat sekarang … (+masuk … −keluar …)" sebagai pegangan saat menghitung;
+- alert **Perlu diisi ulang** (Hari Ini, Stok & Riwayat, checklist purchasing): barang masuk yang sudah dibeli langsung menghilangkan alert;
+- kartu **Stok tercatat sekarang** (Stok & Riwayat): bahan yang sudah bergerak sejak SO, termasuk bahan yang belum pernah di-SO (ditandai kuning, dasar stok 0, tidak memicu alert).
+
+Aturan: SO baru selalu menjadi dasar baru (barang masuk sebelum SO tidak dihitung dua kali); stok minus dipotong ke 0 dan ditandai "cek SO". Penjualan POS belum ikut. **SO fisik tetap sumber kebenaran audit** — Nilai Stok (kartu & grafik) dan audit selisih tidak berubah. Bila fungsi belum dimigrasi, tampilan otomatis kembali ke SO terakhir.
 
 ## Setup database (sekali)
 
@@ -125,6 +135,8 @@ Kartu **Nilai Stok** (beranda owner/admin & tab Stok & Riwayat): total dan per l
 8. Jalankan `supabase/migrations/20260930090000_inventory_sales_bom.sql` (resep menu, penjualan, `inv_sales_save`, tipe `jual` di `inv_stock_movements`) lalu `supabase/seed/inventory_menus_nusa_food.sql`.
 9. Jalankan `supabase/migrations/20261001090000_inventory_audit_mingguan.sql` (laporan audit & catatan tindak lanjut). Ringkasan AI memakai `ANTHROPIC_API_KEY` yang sama dengan fitur AI lain.
 10. Jalankan `supabase/migrations/20261002090000_inventory_transfer_area.sql` (bagian dapur/bar pada permintaan & kiriman stok).
-11. Buat resep produksi di tab Kelola → Resep.
+11. Jalankan `supabase/migrations/20261006090000_inventory_belanja_stok.sql`, `20261007090000_inventory_realtime.sql`, dan `20261010090000_inventory_purchase_cost_atomic.sql` (Belanja → Stok & harga beli aktual).
+12. Jalankan `supabase/migrations/20261011090000_inventory_stock_running.sql` (stok berjalan).
+13. Buat resep produksi di tab Kelola → Resep.
 
 Test logika: `npm run test:inventory`.
