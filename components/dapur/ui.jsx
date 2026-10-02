@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Camera, ClipboardPaste, Search, Share2, X } from "lucide-react";
-import { searchItems, fmtQty } from "../../lib/inventoryLogic";
+import { searchItems, fmtQty, splitWaText } from "../../lib/inventoryLogic";
 import { openWhatsAppShare } from "../../lib/shareWa";
 
 export const C = {
@@ -63,11 +63,35 @@ function whatsappText(text) {
 }
 
 export function WaButton({ text, label = "Kirim laporan ke WhatsApp" }) {
-  if (!text) return null;
+  const [terkirim, setTerkirim] = useState({});
+  const [tersalin, setTersalin] = useState(false);
+  const full = whatsappText(text);
+  // WhatsApp memotong teks kiriman dari aplikasi di ±4.000 karakter → laporan panjang dikirim per bagian.
+  const parts = useMemo(() => splitWaText(full), [full]);
+  useEffect(() => { setTerkirim({}); setTersalin(false); }, [full]);
+  if (!full) return null;
+  if (parts.length <= 1) {
+    return (
+      <Btn kind="wa" onClick={() => openWhatsAppShare(full)}>
+        <Share2 size={18} /> {label}
+      </Btn>
+    );
+  }
+  const salin = async () => {
+    try { await navigator.clipboard.writeText(full); setTersalin(true); } catch { window.prompt("Salin laporan lengkap:", full); }
+  };
   return (
-    <Btn kind="wa" onClick={() => openWhatsAppShare(whatsappText(text))}>
-      <Share2 size={18} /> {label}
-    </Btn>
+    <div style={{ display: "grid", gap: 8 }}>
+      <Notice kind="info">
+        Laporan ini panjang ({full.length.toLocaleString("id-ID")} karakter), melebihi batas WhatsApp. Dikirim dalam <b>{parts.length} bagian</b> — kirim berurutan ke chat yang sama.
+      </Notice>
+      {parts.map((p, i) => (
+        <Btn key={i} kind="wa" onClick={() => { setTerkirim((t) => ({ ...t, [i]: true })); openWhatsAppShare(p); }}>
+          <Share2 size={18} /> {terkirim[i] ? "✓ " : ""}Kirim bagian {i + 1} dari {parts.length}
+        </Btn>
+      ))}
+      <Btn kind="ghost" onClick={salin}>{tersalin ? "✓ Laporan lengkap tersalin" : "Salin laporan lengkap"}</Btn>
+    </div>
   );
 }
 
