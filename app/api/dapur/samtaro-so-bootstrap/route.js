@@ -9,6 +9,7 @@ import {
 } from "../../../../lib/purchasingAliasesAuth.js";
 
 const BUSINESS_ID = "e23ed572-234c-4995-acad-fa6bff7c58d2";
+const SEED_MARKER_CODE = "__SYS_SMT_SO_SEED_20261002";
 
 const ITEMS = [
   // Tambahan owner sebelumnya — tetap dipertahankan.
@@ -169,6 +170,19 @@ export async function POST(req) {
       return Response.json({ error: "Akun tidak punya akses Samtaro." }, { status: 403 });
     }
 
+    // Seed daftar kertas hanya SEKALI. Setelah marker ini ada, user bebas
+    // mengedit/nonaktifkan/menghapus baris SO tanpa sistem menambahkannya lagi.
+    const { data: marker, error: markerErr } = await admin
+      .from("inv_items")
+      .select("id")
+      .eq("business_id", BUSINESS_ID)
+      .eq("kode", SEED_MARKER_CODE)
+      .maybeSingle();
+    if (markerErr) throw markerErr;
+    if (marker) {
+      return Response.json({ ok: true, alreadySeeded: true });
+    }
+
     const codes = [...new Set(ITEMS.map((x) => x.kode))];
     const { data: existingRows, error: existingErr } = await admin
       .from("inv_items")
@@ -249,8 +263,24 @@ export async function POST(req) {
       if (tpErr) throw tpErr;
     }
 
+    const { error: markerInsertErr } = await admin.from("inv_items").insert({
+      business_id: BUSINESS_ID,
+      kode: SEED_MARKER_CODE,
+      nama: "System marker · seed SO Samtaro 2026-10-02",
+      kategori: "System",
+      tipe: "lainnya",
+      satuan: "pcs",
+      harga: 0,
+      lokasi: [],
+      min_stok: 0,
+      aktif: false,
+      catatan: "Marker internal agar daftar kertas Samtaro hanya di-seed sekali.",
+    });
+    if (markerInsertErr) throw markerInsertErr;
+
     return Response.json({
       ok: true,
+      alreadySeeded: false,
       masterCandidates: ITEMS.length,
       templateCandidates: candidates.length,
       addedTemplates: toInsert.length,
