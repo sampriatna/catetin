@@ -95,7 +95,7 @@ import {
 import { buildBusinessAnalysis } from "../../../lib/businessAnalysis";
 import {
   openWhatsAppShare, formatSosmedWa, formatSosmedFormWa, formatSdmWa,
-  formatOmsetWa, formatKeuanganWa, formatVoidWa,
+  formatOmsetWa, formatKeuanganWa, formatVoidWa, formatPurchasingWa,
 } from "../../../lib/shareWa";
 import { pairPageUrl } from "../../../lib/appUrl.js";
 import { exportKeuanganCsv, exportKeuanganPdf } from "../../../lib/laporanKeuanganExport.js";
@@ -2386,14 +2386,30 @@ function Laporan({ s, mutate, onOpenPair, onOpenPurchasingReport, business, feat
       : "Semua dompet";
   const ui = getAccountUi(user, business);
 
-  const waKeuangan = useMemo(() => formatKeuanganWa({
-    periodLabel,
-    inSum,
-    outSum,
-    net,
-    count,
-    scopeLabel,
-  }), [periodLabel, inSum, outSum, net, count, scopeLabel]);
+  // Purchasing: kirim format "Laporan Belanja" (rincian barang + sisa kas kecil),
+  // bukan ringkasan pemasukan/pengeluaran yang membingungkan di grup WA.
+  const waKeuangan = useMemo(() => {
+    if (role === "purchasing" && features?.purchasingModule) {
+      return formatPurchasingWa({
+        date: bounds.start,
+        dateEnd: bounds.end,
+        transactions: tx.filter((t) => t.type === "out" && isPurchasingTx(t)),
+        wallets: s.wallets || [],
+        allTransactions: s.transactions || [],
+        user,
+        selectedWalletId: walletId !== "all" ? walletId : null,
+        periodLabel: range === "Harian" ? null : periodLabel,
+      });
+    }
+    return formatKeuanganWa({
+      periodLabel,
+      inSum,
+      outSum,
+      net,
+      count,
+      scopeLabel,
+    });
+  }, [role, features?.purchasingModule, bounds, tx, s.wallets, s.transactions, user, walletId, range, periodLabel, inSum, outSum, net, count, scopeLabel]);
 
   const businessLabel = resolveBusinessDisplayName(business) || s.profile?.name || "NF3";
 
