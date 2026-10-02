@@ -1514,7 +1514,7 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
       )}
 
       {canManageCicilan(user.role) && bizId && (
-        <CicilanBerandaCard bizId={bizId} hide={hide} onOpen={() => setOverlay("cicilan")} />
+        <CicilanBerandaCard bizId={bizId} localDoc={s} hide={hide} onOpen={() => setOverlay("cicilan")} />
       )}
 
       {showNfOmzet && nfMonthChannels && (
@@ -8900,6 +8900,7 @@ export default function NF3App(props) {
           <Sheet title="Cicilan PayLater" onClose={() => setOverlay(null)}>
             <CicilanPaylater
               bizId={bizId}
+              localDoc={view}
               onChanged={() => {
                 reloadFromCloud({ source: "realtime" });
                 refreshSharedBankData();
