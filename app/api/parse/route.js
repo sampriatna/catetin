@@ -79,6 +79,24 @@ Balas HANYA JSON tanpa markdown: {"type":"out","category":"<yang paling cocok>",
       return Response.json(result);
     }
 
+    if (mode === "cicilan") {
+      const result = await callClaude({
+        model: MODEL, max_tokens: 800,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: media, data: image } },
+            { type: "text", text: `Ini screenshot pilihan cicilan PayLater (Shopee SPayLater / Kredivo / dll) atau rincian pesanan.
+Ambil: harga/total yang dicicil (pokok), nama produk singkat, dan SEMUA opsi tenor beserta nominal per bulan.
+Angka Rupiah: titik = pemisah ribuan (Rp4.247.027 = 4247027).
+Balas HANYA JSON tanpa markdown:
+{"pokok":<angka bulat>,"label":"<nama produk singkat>","options":[{"tenor":<bulan>,"perBulan":<angka bulat>}]}` },
+          ],
+        }],
+      });
+      return Response.json(result);
+    }
+
     return Response.json({ error: "mode tidak dikenal" }, { status: 400 });
 
   } catch (e) {

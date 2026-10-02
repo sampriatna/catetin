@@ -131,6 +131,8 @@ import {
 } from "../../../lib/sharedWalletMirror.js";
 import { canWriteSharedBank } from "../../../lib/sharedBankWrite.js";
 import { fetchSharedBankBalances, fetchSharedBankTransactions, postSharedBankTx } from "../../../lib/repo";
+import CicilanPaylater, { CicilanBerandaCard } from "../../../components/CicilanPaylater";
+import { canManageCicilan, resolvePaylaterSource } from "../../../lib/cicilanSource";
 import PwaInstallBanner, { registerServiceWorker, forceReloadLatestApp } from "../../../components/PwaInstallBanner";
 import { getAppBuildLabel, getAppBuildSha, APP_SW_VERSION } from "../../../lib/buildInfo";
 import { isSectionSynced, healPendingSectionStatuses } from "../../../lib/pendingSectionHeal";
@@ -1509,6 +1511,10 @@ function Beranda({ s, setTab, setOverlay, onOpenLaporan, hide, setHide, onCloudS
           <StockValueCard bizId={bizId} saldo={totalSaldo} hide={hide}
             onOpen={() => { window.location.href = "/dapur?tab=ringkasan"; }} />
         </div>
+      )}
+
+      {canManageCicilan(user.role) && bizId && resolvePaylaterSource(s, bizId) && (
+        <CicilanBerandaCard bizId={bizId} hide={hide} onOpen={() => setOverlay("cicilan")} />
       )}
 
       {showNfOmzet && nfMonthChannels && (
@@ -6103,6 +6109,7 @@ function PengaturanScreen({ s, mutate, onClose, setOverlay, setTab, bizId, authU
             </>
           )}
           {canDo(role, "kelolaDompet") && <SRow icon={Wallet} label="Kelola Dompet" sub="Atur dompet dan pembagian uang Anda" onClick={() => setOverlay("wallets")} chev />}
+          {canManageCicilan(role) && bizId && resolvePaylaterSource(s, bizId) && <SRow icon={Banknote} label="Cicilan PayLater" sub="Jadwal & bayar cicilan, bandingkan tenor" onClick={() => setOverlay("cicilan")} chev />}
           {canDo(role, "kelolaKategoriSendiri") && <SRow icon={Filter} label="Kelola Kategori" sub={canDo(role, "kelolaKategoriSemua") ? "Semua kategori transaksi" : "Kategori untuk role Anda"} onClick={() => setOverlay("categories")} chev />}
           {features?.purchasingModule && canDo(role, "kelolaKategoriSemua") && (
             <SRow icon={Filter} label="Kategori Purchasing" sub="Icon, warna & sembunyikan 13 kelompok belanja" onClick={() => setOverlay("kategoriPurchasing")} chev />
@@ -8872,6 +8879,17 @@ export default function NF3App(props) {
               setOverlay(null);
             }}
           />
+        )}
+        {overlay === "cicilan" && canManageCicilan(user.role) && (
+          <Sheet title="Cicilan PayLater" onClose={() => setOverlay(null)}>
+            <CicilanPaylater
+              bizId={bizId}
+              onChanged={() => {
+                reloadFromCloud({ source: "realtime" });
+                refreshSharedBankData();
+              }}
+            />
+          </Sheet>
         )}
         {overlay === "categories" && <CatScreen s={view} mutate={mutate} onClose={() => setOverlay(null)} />}
         {overlay === "kategoriPurchasing" && features.purchasingModule && canDo(user.role, "kelolaKategoriSemua") && (
