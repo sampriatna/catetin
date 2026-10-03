@@ -70,19 +70,13 @@ create policy inv_min_stock_write_owner on public.inv_min_stock
   using (public.business_role(business_id) in ('owner', 'admin'))
   with check (public.business_role(business_id) in ('owner', 'admin'));
 
--- Purchasing gudang (outlet kosong / GDG / outlet KBU-KSM-SMT = profil purchasing & gudang): hanya Gudang.
--- Purchasing area khusus (mis. Jagasatru) tidak mengatur minimal stok.
+-- Semua purchasing (Dodi, Mahmud, Dul/Jagasatru): semua lokasi — purchasing menyesuaikan minimum tiap outlet.
 drop policy if exists inv_min_stock_write_gudang on public.inv_min_stock;
-create policy inv_min_stock_write_gudang on public.inv_min_stock
+drop policy if exists inv_min_stock_write_purchasing on public.inv_min_stock;
+create policy inv_min_stock_write_purchasing on public.inv_min_stock
   for all
-  using (
-    public.business_role(business_id) = 'purchasing' and lokasi = 'GDG'
-    and upper(coalesce(public.business_outlet(business_id), '')) in ('', 'GDG', 'GUDANG', 'KBU', 'KSM', 'SMT')
-  )
-  with check (
-    public.business_role(business_id) = 'purchasing' and lokasi = 'GDG'
-    and upper(coalesce(public.business_outlet(business_id), '')) in ('', 'GDG', 'GUDANG', 'KBU', 'KSM', 'SMT')
-  );
+  using (public.business_role(business_id) = 'purchasing')
+  with check (public.business_role(business_id) = 'purchasing');
 
 -- PIC dapur outlet: hanya outletnya sendiri.
 drop policy if exists inv_min_stock_write_dapur on public.inv_min_stock;
