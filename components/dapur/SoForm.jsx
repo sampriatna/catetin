@@ -170,7 +170,7 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
         grup: hasTemplate ? r.grup : null, nama: r.label, satuan: r.satuan_so, qty: qSo,
         prevQty: last ? itemToSoQty(r, last.qty, last.satuan || r.item.satuan) : null,
         statusQty: conv.converted ? conv.qty : null, statusSatuan: conv.converted && conv.satuan !== r.satuan_so ? conv.satuan : null,
-        minStok: conv.converted ? r.item.min_stok : null,
+        minStok: conv.converted ? r.item.min_stok : null, faktor: conv.converted ? rowFactor(r) : null,
       };
     });
     total = round2(total);
