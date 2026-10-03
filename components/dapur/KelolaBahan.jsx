@@ -10,7 +10,7 @@ import { C, card, input, label, Btn, Chips, Notice, SearchBox, ItemPicker, QtyIn
 const MODES = ["Bahan", "Resep", "Daftar SO", "Cek Lokasi"];
 const OUTLETS = ["KBU", "KSM", "SMT"];
 
-const EMPTY_ITEM = { kode: "", nama: "", kategori: "", tipe: "bahan", satuan: "pcs", harga: "", lokasi: [], min_stok: "", aktif: true, catatan: "" };
+const EMPTY_ITEM = { kode: "", nama: "", kategori: "", tipe: "bahan", satuan: "pcs", harga: "", lokasi: [], aktif: true, catatan: "" };
 
 // ── Foto kemasan → ukuran isi otomatis (AI murah di server; hasil tetap bisa diubah) ──
 
@@ -70,7 +70,7 @@ function FotoKemasan({ bizId, onHasil }) {
 function ItemEditor({ bizId, item, outlet = null, onDone, onCancel }) {
   const [f, setF] = useState({
     ...EMPTY_ITEM, ...(outlet && !item?.id ? { lokasi: [outlet] } : {}), ...item,
-    harga: item?.harga ?? "", min_stok: item?.min_stok ?? "",
+    harga: item?.harga ?? "",
   });
   const bisaUbah = !outlet || !item?.id || (Array.isArray(item.lokasi) && item.lokasi.length === 1 && item.lokasi[0] === outlet);
   const [busy, setBusy] = useState(false);
@@ -113,13 +113,13 @@ function ItemEditor({ bizId, item, outlet = null, onDone, onCancel }) {
           </select>
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <div><span style={label}>Satuan hitung</span><input style={input} value={f.satuan} onChange={(e) => set("satuan", e.target.value)} /></div>
         <div><span style={label}>Modal / satuan</span><input style={input} inputMode="decimal" value={f.harga} onChange={(e) => set("harga", e.target.value.replace(",", "."))} /></div>
-        <div><span style={label}>Stok minimum</span><input style={input} inputMode="decimal" value={f.min_stok ?? ""} onChange={(e) => set("min_stok", e.target.value.replace(",", "."))} /></div>
       </div>
       <div style={{ fontSize: 12, color: C.sub }}>
         Satuan hitung = satuan yang dipakai saat SO (mis. pcs, gr, botol). Modal harus per satuan hitung yang sama.
+        {" "}Minimal stok diatur per lokasi di tab <b>Minimal Stok</b>{item?.id && f.satuan !== item.satuan ? " — satuan diubah, minimal stok bahan ini perlu diatur ulang di tiap lokasi." : "."}
         {f.tipe === "setengah_jadi" ? " Modal barang setengah jadi ter-update otomatis setiap produksi." : ""}
       </div>
       {outlet ? (
@@ -297,7 +297,6 @@ export default function KelolaBahan({ bizId, access, items, recipes, templates, 
                 </div>
                 <div style={{ fontSize: 12, color: C.sub }}>
                   {it.kode} · {TIPE_LABEL[it.tipe] || it.tipe} · {it.lokasi?.length ? it.lokasi.join(", ") : "semua lokasi"}
-                  {it.min_stok ? ` · min ${fmtQty(it.min_stok)}` : ""}
                 </div>
                 {it.catatan && <div style={{ fontSize: 12, color: C.warn }}>{it.catatan}</div>}
               </button>
