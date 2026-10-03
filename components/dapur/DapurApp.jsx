@@ -3,9 +3,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, LogOut, RefreshCw } from "lucide-react";
-import { LOKASI_LABEL } from "../../lib/inventoryLogic";
+import { LOKASI_LABEL, buildMinStokMap } from "../../lib/inventoryLogic";
 import { CAP, NO_ACCESS_MSG, dapurAccess, recipesForArea, visibleTabs } from "../../lib/dapurAccess";
-import { loadItems, loadRecipes, loadStockSnapshot, loadStockRunning, loadEvents, loadSoTemplates, loadMenus, loadMenuAliases } from "../../lib/inventoryRepo";
+import { loadItems, loadRecipes, loadStockSnapshot, loadStockRunning, loadEvents, loadSoTemplates, loadMenus, loadMenuAliases, loadMinStock } from "../../lib/inventoryRepo";
 import { supabase } from "../../lib/supabaseClient";
 import { C, Notice } from "./ui";
 import SoForm from "./SoForm";
@@ -19,6 +19,7 @@ import BelanjaKeStok from "./BelanjaKeStok";
 import HariIni from "./HariIni";
 import Penjualan from "./Penjualan";
 import ResepMenu from "./ResepMenu";
+import MinimalStok from "./MinimalStok";
 
 function readTab() {
   try { return new URLSearchParams(window.location.search).get("tab"); } catch { return null; }
@@ -46,6 +47,8 @@ export default function DapurApp({ bizId, user, signOut }) {
   const [running, setRunning] = useState(null); // stok berjalan (null = fungsi belum ada → pakai SO terakhir)
   const [events, setEvents] = useState([]);
   const [templates, setTemplates] = useState([]);
+  const [minRows, setMinRows] = useState([]); // minimal stok per lokasi × bahan (inv_min_stock)
+  const minMap = useMemo(() => buildMinStokMap(minRows), [minRows]);
   const [wastePrefill, setWastePrefill] = useState(null);
   const [bukaMinta, setBukaMinta] = useState(false); // dari SO: langsung buka form permintaan (sudah terisi usulan)
   const [menus, setMenus] = useState([]);
@@ -116,14 +119,15 @@ export default function DapurApp({ bizId, user, signOut }) {
         }
       }
 
-      const [it, rc, sn, ev, tp, rn] = await Promise.all([
+      const [it, rc, sn, ev, tp, rn, ms] = await Promise.all([
         loadItems(bizId), loadRecipes(bizId), loadStockSnapshot(bizId),
         loadEvents(bizId, { lokasi: access.isOutlet ? access.outlet : null, limit: 60 }),
         // Daftar SO outlet opsional: kalau tabel belum dimigrasi, form tetap jalan pakai daftar bahan.
         loadSoTemplates(bizId).catch(() => []),
         loadStockRunning(bizId).catch(() => null),
+        loadMinStock(bizId),
       ]);
-      setItems(it); setRecipes(rc); setSnapshot(sn); setEvents(ev); setTemplates(tp); setRunning(rn);
+      setItems(it); setRecipes(rc); setSnapshot(sn); setEvents(ev); setTemplates(tp); setRunning(rn); setMinRows(ms);
     } catch (e) {
       setErr(e.message || String(e));
     } finally {
@@ -205,10 +209,10 @@ export default function DapurApp({ bizId, user, signOut }) {
       ) : (
         <>
           {is("hari") && (
-            <HariIni bizId={bizId} user={user} access={access} lokasi={lokasi} items={items} snapshot={snapshot} running={running} onGo={setTab} />
+            <HariIni bizId={bizId} user={user} access={access} lokasi={lokasi} items={items} snapshot={snapshot} running={running} minMap={minMap} onGo={setTab} />
           )}
           {is("so") && (
-            <SoForm bizId={bizId} user={user} access={access} lokasi={lokasi} items={items} templates={templates} snapshot={snapshot} running={running} onSaved={reload}
+            <SoForm bizId={bizId} user={user} access={access} lokasi={lokasi} items={items} templates={templates} snapshot={snapshot} running={running} minMap={minMap} onSaved={reload}
               onWasteFromWa={(w) => { setWastePrefill(w); setTab("waste"); }}
               onBuatPermintaan={() => { setBukaMinta(true); setTab("kirim"); }} />
           )}
@@ -227,10 +231,10 @@ export default function DapurApp({ bizId, user, signOut }) {
             <ProduksiForm bizId={bizId} user={user} lokasi={lokasi} items={items}
               recipes={recipesForArea(recipes, templates, lokasi, access.area)} snapshot={snapshot} onSaved={reload} />
           )}
-          {is("kirim") && <KirimStok bizId={bizId} user={user} access={access} items={items} templates={templates} onSaved={reload}
+          {is("kirim") && <KirimStok bizId={bizId} user={user} access={access} items={items} templates={templates} minMap={minMap} onSaved={reload}
             bukaMinta={bukaMinta} onDibuka={() => setBukaMinta(false)} />}
           {is("ringkasan") && (
-            <Ringkasan bizId={bizId} items={items} snapshot={snapshot} running={running} events={events} lokasiScope={access.lihatLokasi}
+            <Ringkasan bizId={bizId} items={items} snapshot={snapshot} running={running} minMap={minMap} events={events} lokasiScope={access.lihatLokasi}
               canDelete={access.can(CAP.HAPUS_RIWAYAT)} onChanged={reload} />
           )}
           {is("penjualan") && (
@@ -240,6 +244,10 @@ export default function DapurApp({ bizId, user, signOut }) {
           {is("menu") && (
             <ResepMenu bizId={bizId} access={access} items={items} templates={templates} menus={menus} prefill={menuPrefill}
               onPrefillUsed={clearMenuPrefill} onChanged={reloadMenus} />
+          )}
+          {is("minstok") && (
+            <MinimalStok bizId={bizId} user={user} access={access} items={items} templates={templates} snapshot={snapshot} running={running}
+              minMap={minMap} onChanged={reload} />
           )}
           {is("kelola") && <KelolaBahan bizId={bizId} access={access} items={items} recipes={recipes} templates={templates} onChanged={reload} />}
         </>

@@ -3,7 +3,7 @@
 
 import { useMemo, useState } from "react";
 import {
-  LOKASI, LOKASI_LABEL, stockValueByLokasi, stockStatus, stockRowsFor, runningBreakdown, fmtRp, fmtQty, todayJakarta,
+  LOKASI, LOKASI_LABEL, stockValueByLokasi, stockStatus, stockRowsFor, runningBreakdown, minStokAt, kekuranganStok, fmtRp, fmtQty, todayJakarta,
 } from "../../lib/inventoryLogic";
 import { deleteEvent, fotoUrls } from "../../lib/inventoryRepo";
 import { C, card, Notice, StatusBadge } from "./ui";
@@ -17,7 +17,7 @@ function daysAgo(dateStr, n) {
   return d.toISOString().slice(0, 10);
 }
 
-export default function Ringkasan({ bizId, items, snapshot, running, events, lokasiScope, canDelete, onChanged }) {
+export default function Ringkasan({ bizId, items, snapshot, running, minMap, events, lokasiScope, canDelete, onChanged }) {
   const [openId, setOpenId] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [err, setErr] = useState("");
@@ -31,10 +31,14 @@ export default function Ringkasan({ bizId, items, snapshot, running, events, lok
   // Alert memakai stok berjalan (SO terakhir + barang masuk − keluar); tanpa fungsi itu, jatuh ke SO terakhir.
   const stockRows = useMemo(() => stockRowsFor(running, snapshot).filter((r) => scope.includes(r.lokasi)), [running, snapshot, scope]);
   const alerts = useMemo(() => stockRows
-    .map((r) => ({ ...r, item: byId[r.item_id], status: stockStatus(r.qty, byId[r.item_id]?.min_stok) }))
+    // Minimal stok dibaca per lokasi baris (bukan angka global bahan).
+    .map((r) => {
+      const min = byId[r.item_id] ? minStokAt(minMap, r.lokasi, byId[r.item_id]) : null;
+      return { ...r, item: byId[r.item_id], min, kurang: kekuranganStok(r.qty, min), status: stockStatus(r.qty, min) };
+    })
     .filter((r) => r.item && r.item.aktif !== false && (r.status === "habis" || r.status === "menipis"))
     .sort((a, b) => (a.status === b.status ? a.item.nama.localeCompare(b.item.nama) : a.status === "habis" ? -1 : 1)),
-  [stockRows, byId]);
+  [stockRows, byId, minMap]);
   // Bahan yang stoknya sudah bergerak sejak SO terakhir (atau belum pernah di-SO) — supaya barang masuk kelihatan.
   const bergerak = useMemo(() => (running || [])
     .filter((r) => scope.includes(r.lokasi) && byId[r.item_id] && byId[r.item_id].aktif !== false && r.qty_raw !== null && (!r.has_so || Number(r.masuk) > 0 || Number(r.keluar) > 0))
@@ -93,7 +97,7 @@ export default function Ringkasan({ bizId, items, snapshot, running, events, lok
           <div key={`${a.lokasi}-${a.item_id}`} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "6px 0", borderBottom: `1px solid ${C.line}`, fontSize: 13 }}>
             <span>{a.item.nama} <span style={{ color: C.sub }}>· {a.lokasi}</span></span>
             <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              {fmtQty(a.qty)} / min {fmtQty(a.item.min_stok)} {a.item.satuan} <StatusBadge status={a.status} />
+              {fmtQty(a.qty)} / {a.min === null ? "min belum diatur" : `min ${fmtQty(a.min)}`} {a.item.satuan}{a.kurang ? ` · kurang ${fmtQty(a.kurang)}` : ""} <StatusBadge status={a.status} />
             </span>
           </div>
         ))}

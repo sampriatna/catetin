@@ -7,7 +7,7 @@ import { tandaiAksiSendiri } from "../../lib/liveNotif";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   LOKASI, LOKASI_LABEL, TRANSFER_STATUS, buildSoRows, buildTransferLines, rowsForArea,
-  transferLineNilai, normSearch, parseQty, round2, makeClientRef, todayJakarta, formatTransferWa, fmtRp, fmtQty,
+  transferLineNilai, normSearch, parseQty, round2, makeClientRef, todayJakarta, formatTransferWa, fmtRp, fmtQty, minStokAt,
   parseWaStock, applyWaToRows,
 } from "../../lib/inventoryLogic";
 import { loadTransfers, saveTransfer, uploadFotos } from "../../lib/inventoryRepo";
@@ -35,7 +35,7 @@ function waLines(lines, itemsById) {
   }));
 }
 
-export default function KirimStok({ bizId, user, access, items, templates, onSaved, bukaMinta = false, onDibuka }) {
+export default function KirimStok({ bizId, user, access, items, templates, minMap, onSaved, bukaMinta = false, onDibuka }) {
   // Izin dari lib/dapurAccess.js: outlet minta & terima untuk outletnya, gudang memproses & kirim, owner semua.
   const acc = access || dapurAccess(user);
   const canMinta = acc.can(CAP.KIRIM_MINTA);
@@ -84,7 +84,7 @@ export default function KirimStok({ bizId, user, access, items, templates, onSav
 
   if (view.mode === "baru") {
     return <FormBaru bizId={bizId} user={user} access={acc} action={view.action} items={items} templates={templates}
-      itemsById={itemsById} onCancel={() => setView({ mode: "list" })} onDone={finish} />;
+      itemsById={itemsById} minMap={minMap} onCancel={() => setView({ mode: "list" })} onDone={finish} />;
   }
   if (view.mode === "kirim") {
     return <FormKirim bizId={bizId} user={user} t={view.t} items={items} itemsById={itemsById}
@@ -206,7 +206,7 @@ function TransferCard({ t, itemsById, canKirim, canTerima, canBatal, onKirim, on
 
 // ── Permintaan baru (outlet) / kirim langsung (gudang) ─────
 
-function FormBaru({ bizId, user, access, action, items, templates, itemsById, onCancel, onDone }) {
+function FormBaru({ bizId, user, access, action, items, templates, itemsById, minMap, onCancel, onDone }) {
   const tujuanOptions = (access.isOutlet ? [access.outlet] : LOKASI).filter((l) => l !== "GDG");
   const [ke, setKe] = useState(tujuanOptions[0] || "KBU");
   const [tanggal, setTanggal] = useState(todayJakarta());
@@ -330,7 +330,7 @@ function FormBaru({ bizId, user, access, action, items, templates, itemsById, on
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderBottom: `1px solid ${C.line}` }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 700 }}>{r.label}</div>
-                  <div style={{ fontSize: 12, color: C.sub }}><b>{r.satuan_so}</b>{r.item.min_stok ? ` · min ${fmtQty(r.item.min_stok)} ${r.item.satuan}` : ""}</div>
+                  <div style={{ fontSize: 12, color: C.sub }}><b>{r.satuan_so}</b>{(() => { const m = minStokAt(minMap, ke, r.item); return m !== null ? ` · min ${LOKASI_LABEL[ke] || ke} ${fmtQty(m)} ${r.item.satuan}` : ""; })()}</div>
                 </div>
                 <QtyInput value={counts[r.key]} onChange={(v) => setCounts((c) => ({ ...c, [r.key]: v }))} />
               </div>

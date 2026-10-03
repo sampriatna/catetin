@@ -5,7 +5,7 @@ import { showActionToast, toastGagal } from "../../lib/actionToast";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   SHIFTS, buildSoRows, rowsForArea, defaultArea, buildSoLinesFromRows, soToItemQty, itemToSoQty, rowFactor, normSearch, parseQty,
-  stockStatus, soDelta, round2, makeClientRef, todayJakarta, formatSoWa, fmtRp, fmtQty,
+  stockStatus, minStokAt, soDelta, round2, makeClientRef, todayJakarta, formatSoWa, fmtRp, fmtQty,
   parseWaStock, applyWaToRows, wasteFromWa, countsFromSoLines, usulanPermintaan, soTidakWajar,
 } from "../../lib/inventoryLogic";
 import { loadEvents, submitEvent, uploadFotos } from "../../lib/inventoryRepo";
@@ -23,7 +23,7 @@ function writeDraft(key, v) {
 const jam = (t) => new Date(t).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
 const UBAH_MS = 24 * 3600 * 1000; // staf outlet boleh ubah SO < 24 jam (sama dengan RPC)
 
-export default function SoForm({ bizId, user, access, lokasi, items, templates, snapshot, running, onSaved, onWasteFromWa, onBuatPermintaan }) {
+export default function SoForm({ bizId, user, access, lokasi, items, templates, snapshot, running, minMap, onSaved, onWasteFromWa, onBuatPermintaan }) {
   const allRows = useMemo(() => buildSoRows(items, templates, lokasi), [items, templates, lokasi]);
   // Daftar dibagi per area (dapur / bar) bila outlet punya akun terpisah; Samtaro tanpa area = satu daftar.
   const hasArea = allRows.some((r) => r.area);
@@ -170,7 +170,8 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
         grup: hasTemplate ? r.grup : null, nama: r.label, satuan: r.satuan_so, qty: qSo,
         prevQty: last ? itemToSoQty(r, last.qty, last.satuan || r.item.satuan) : null,
         statusQty: conv.converted ? conv.qty : null, statusSatuan: conv.converted && conv.satuan !== r.satuan_so ? conv.satuan : null,
-        minStok: conv.converted ? r.item.min_stok : null,
+        // Minimal stok lokasi SO ini (usulan permintaan per outlet, bukan angka global).
+        minStok: conv.converted ? minStokAt(minMap, lokasi, r.item) : null,
       };
     });
     total = round2(total);
@@ -396,7 +397,8 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
           const curItem = curOk && f !== null ? soToItemQty(r, cur).qty : null;
           const run = runningByItem[it.id];
           const runQty = run && run.qty !== null && run.qty !== undefined ? Number(run.qty) : null;
-          const st = stockStatus(curItem ?? (runQty !== null ? runQty : (last && (last.satuan || it.satuan) === it.satuan ? last.qty : null)), it.min_stok);
+          const minLok = minStokAt(minMap, lokasi, it);
+          const st = stockStatus(curItem ?? (runQty !== null ? runQty : (last && (last.satuan || it.satuan) === it.satuan ? last.qty : null)), minLok);
           const lastSo = last ? itemToSoQty(r, last.qty, last.satuan || it.satuan) : null;
           const d = curOk ? soDelta(lastSo, cur) : null;
           const showHead = grup === "Semua" && (idx === 0 || visible[idx - 1].grup !== r.grup);
@@ -417,7 +419,7 @@ export default function SoForm({ bizId, user, access, lokasi, items, templates, 
                     {run && (Number(run.masuk) > 0 || Number(run.keluar) > 0) && f !== null
                       ? <span style={{ color: C.brand, fontWeight: 700 }}>{` · tercatat sekarang ${fmtQty(itemToSoQty(r, run.qty_raw < 0 ? 0 : run.qty_raw, it.satuan))} ${r.satuan_so}${Number(run.masuk) > 0 ? ` (+masuk ${fmtQty(itemToSoQty(r, Number(run.masuk), it.satuan))}` : " ("}${Number(run.keluar) > 0 ? `${Number(run.masuk) > 0 ? " " : ""}−keluar ${fmtQty(itemToSoQty(r, Number(run.keluar), it.satuan))}` : ""})`}</span>
                       : null}
-                    {it.min_stok ? ` · min ${fmtQty(it.min_stok)} ${it.satuan}` : ""}
+                    {minLok !== null ? ` · min ${fmtQty(minLok)} ${it.satuan}` : ""}
                   </div>
                 </div>
                 {String(raw ?? "").trim() === "" && (

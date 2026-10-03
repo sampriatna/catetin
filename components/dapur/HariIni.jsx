@@ -41,7 +41,7 @@ function ActionChip({ label: text, onClick }) {
   );
 }
 
-export default function HariIni({ bizId, user, access, lokasi, items, snapshot, running, onGo }) {
+export default function HariIni({ bizId, user, access, lokasi, items, snapshot, running, minMap, onGo }) {
   const acc = access || dapurAccess(user);
   const manager = acc.isOwner;
   const doesGudang = acc.can(CAP.SO) && !acc.isOutlet && !manager; // gudang / purchasing merangkap gudang
@@ -65,7 +65,8 @@ export default function HariIni({ bizId, user, access, lokasi, items, snapshot, 
 
   // Outlet: stok outletnya. Purchasing / gudang / owner: semua lokasi (belanja & kirim untuk outlet juga).
   const alertLokasi = acc.isOutlet ? [acc.outlet] : acc.lihatLokasi;
-  const menipis = useMemo(() => stokMenipis(stockRowsFor(running, snapshot), items, alertLokasi).slice(0, 20), [running, snapshot, items, alertLokasi]);
+  // Minimum dibaca per lokasi tiap baris (KBU dengan minimum KBU, dst.).
+  const menipis = useMemo(() => stokMenipis(stockRowsFor(running, snapshot), items, alertLokasi, minMap).slice(0, 20), [running, snapshot, items, alertLokasi, minMap]);
 
   if (err) return <Notice kind="bad">Status hari ini belum bisa dimuat: {err}</Notice>;
   if (!st) return <div style={{ padding: 30, textAlign: "center", color: C.sub }}>Memuat…</div>;
@@ -163,7 +164,7 @@ export default function HariIni({ bizId, user, access, lokasi, items, snapshot, 
           {menipis.map((r) => (
             <div key={`${r.lokasi}-${r.item_id}`} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13 }}>
               <span>{r.status === "habis" ? "🔴" : "🟠"} {r.item.nama}{acc.isOutlet ? "" : ` · ${r.lokasi}`}</span>
-              <span style={{ color: C.sub }}>{fmtQty(r.qty)} / min {fmtQty(r.item.min_stok)} {r.item.satuan}</span>
+              <span style={{ color: C.sub }}>{fmtQty(r.qty)} / {r.min === null ? "min belum diatur" : `min ${fmtQty(r.min)}`} {r.item.satuan}{r.kurang ? ` · kurang ${fmtQty(r.kurang)}` : ""}</span>
             </div>
           ))}
           {acc.can(CAP.KIRIM_MINTA) && (
